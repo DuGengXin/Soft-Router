@@ -1,0 +1,16 @@
+[Unit]
+Description=Gateway-Kit dnsmasq (started only after confirmed apply)
+After=network-online.target gateway-kit.service gateway-kit-singbox.service
+Requires=gateway-kit-singbox.service
+ConditionPathExists=/etc/gateway-kit/generated/dnsmasq.gateway-kit.conf
+StartLimitIntervalSec=120
+StartLimitBurst=10
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/etc/gateway-kit/generated/dnsmasq.gateway-kit.conf
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

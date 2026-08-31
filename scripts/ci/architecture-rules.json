@@ -1,0 +1,6 @@
+{
+  "allowed": {
+    "gateway-core": ["gateway-model"],
+    "gateway-app": ["gateway-model", "gateway-core"]
+  }
+}

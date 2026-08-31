@@ -1,0 +1,16 @@
+[Unit]
+Description=Gateway-Kit control plane (observe-safe until a confirmed apply)
+After=network-online.target nss-lookup.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/gateway-kit agent
+Restart=on-failure
+RestartSec=3
+Environment=GATEWAY_KIT_CONFIG=/etc/gateway-kit/config.toml
+EnvironmentFile=-/etc/gateway-kit/generated/forwarding.env
+ExecStartPre=/usr/local/libexec/gateway-kit-wait-network.sh
+
+[Install]
+WantedBy=multi-user.target

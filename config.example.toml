@@ -1,0 +1,53 @@
+# Copy to /etc/gateway-kit/config.toml
+# Default is observe mode: install must not change routing.
+# If you must use a public-looking LAN (e.g. 192.111.40.0/24), the validator will warn.
+
+mode = "observe"
+
+[system]
+hostname = "gateway"
+timezone = "Asia/Shanghai"
+
+[environment]
+conflict_policy = "block"
+
+[wan]
+interface = ""
+address = "192.168.40.2/24"
+gateway = "192.168.40.1"
+# Required in gateway mode. Use resolvers appropriate for this deployment;
+# Gateway-Kit does not select or depend on a public DNS provider by default.
+dns = []
+
+[lan]
+interface = ""
+address = "192.168.50.1/24"
+
+[dhcp]
+enabled = true
+range_start = "192.168.50.100"
+range_end = "192.168.50.200"
+lease_time = "12h"
+
+[firewall]
+enabled = true
+table_name = "gateway_kit"
+ssh_port = 22
+
+[wireguard]
+enabled = false
+interface = "wg0"
+address = ""
+listen_port = 51820
+peer_endpoint = ""
+peer_allowed_ips = "0.0.0.0/0"
+
+[routing]
+# 国内直连规则集经 WAN 从 jsDelivr 拉取（避开 raw.githubusercontent.com），缓存在 generated/sing-box-cache.db。
+china_direct = true
+extra_direct_cidrs = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+policy_table_id = 51820
+
+[ui]
+bind = "127.0.0.1"
+port = 7676

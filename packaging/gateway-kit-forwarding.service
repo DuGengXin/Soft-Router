@@ -1,0 +1,16 @@
+[Unit]
+Description=Gateway-Kit Docker FORWARD compatibility
+After=network-online.target gateway-kit.service docker.service
+Before=gateway-kit-singbox.service gateway-kit-dnsmasq.service
+ConditionPathExists=/etc/gateway-kit/generated/forwarding.env
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/gateway-kit/generated/forwarding.env
+ExecStartPre=/usr/local/libexec/gateway-kit-wait-network.sh
+ExecStart=/usr/local/libexec/gateway-kit-forwarding.sh apply
+ExecStop=/usr/local/libexec/gateway-kit-forwarding.sh remove
+
+[Install]
+WantedBy=multi-user.target

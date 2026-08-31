@@ -1,0 +1,26 @@
+/target/
+/target-ui-*/
+*.db
+*.db-shm
+*.db-wal
+.env
+/run/
+/logs/
+/backups/
+/generated/
+frontend/node_modules/
+crates/gateway-app/ui/node_modules/
+crates/gateway-app/ui/dist/
+secrets.toml
+config.toml
+state.db
+doctor.json
+
+# Local credentials and machine-specific exports.
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.secret
+*.local
