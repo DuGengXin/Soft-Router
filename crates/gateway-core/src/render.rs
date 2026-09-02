@@ -310,7 +310,7 @@ fn render_singbox_transport(config: &AppConfig, proxy: Option<&ProxyEndpoint>) -
     let china = if config.routing.china_direct {
         r#",
       {
-        "rule_set": ["geoip-cn", "geosite-cn"],
+        "rule_set": ["geoip-cn", "geosite-cn", "geosite-private"],
         "outbound": "direct"
       }"#
     } else {
@@ -330,6 +330,13 @@ fn render_singbox_transport(config: &AppConfig, proxy: Option<&ProxyEndpoint>) -
         "type": "remote",
         "format": "binary",
         "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs",
+        "download_detour": "direct"
+      },
+      {
+        "tag": "geosite-private",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-private.srs",
         "download_detour": "direct"
       }
     ]"#
@@ -401,6 +408,16 @@ fn render_singbox_transport(config: &AppConfig, proxy: Option<&ProxyEndpoint>) -
         }
     ]);
     let dns_json = serde_json::to_string(&dns_servers).unwrap_or_else(|_| "[]".into());
+    let dns_rules = if config.routing.china_direct {
+        r#"[
+      { "rule_set": ["geosite-cn", "geosite-private"], "action": "route", "server": "direct-dns-0" },
+      { "inbound": ["dns-in"], "action": "route", "server": "proxy-dns" }
+    ]"#
+    } else {
+        r#"[
+      { "inbound": ["dns-in"], "action": "route", "server": "proxy-dns" }
+    ]"#
+    };
     let auto_detect = if wan.is_empty() { "true" } else { "false" };
     format!(
         r#"{{
@@ -413,9 +430,7 @@ fn render_singbox_transport(config: &AppConfig, proxy: Option<&ProxyEndpoint>) -
   }},
   "dns": {{
     "servers": {dns_json},
-    "rules": [
-      {{ "inbound": ["dns-in"], "action": "route", "server": "proxy-dns" }}
-    ],
+    "rules": {dns_rules},
     "final": "proxy-dns",
     "strategy": "ipv4_only"
   }},
@@ -592,6 +607,10 @@ mod tests {
         assert_eq!(value["route"]["rules"][1]["action"], "sniff");
         assert_eq!(value["dns"]["final"], "proxy-dns");
         assert_eq!(value["dns"]["strategy"], "ipv4_only");
+        assert_eq!(value["dns"]["rules"][0]["rule_set"][0], "geosite-cn");
+        assert_eq!(value["dns"]["rules"][0]["rule_set"][1], "geosite-private");
+        assert_eq!(value["dns"]["rules"][0]["server"], "direct-dns-0");
+        assert_eq!(value["dns"]["rules"][1]["server"], "proxy-dns");
         assert_eq!(value["outbounds"][1]["type"], "vless");
         assert_eq!(value["outbounds"][1]["server"], "example.com");
         assert_eq!(

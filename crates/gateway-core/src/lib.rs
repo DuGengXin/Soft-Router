@@ -969,6 +969,8 @@ mod tests {
             .find(|f| f.relative_path.ends_with("sing-box.json"))
             .unwrap();
         assert!(!sb.contents.contains("geoip-cn"));
+        assert!(!sb.contents.contains("geosite-cn"));
+        assert!(!sb.contents.contains("geosite-private"));
         assert!(sb.contents.contains("\"final\": \"wg-out\""));
     }
 
