@@ -15,7 +15,8 @@ concurrency:
 jobs:
   validate:
     name: Validate
-    runs-on: ubuntu-latest
+    # Build against glibc 2.35 so the artifact runs on the supported Ubuntu 22.04 gateway.
+    runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
