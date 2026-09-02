@@ -62,3 +62,10 @@ jobs:
 
       - name: Build release binary
         run: cargo build --release --locked -p gateway-app
+
+      - name: Upload Linux release binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-kit-linux-x86_64
+          path: target/release/gateway-kit
+          if-no-files-found: error
