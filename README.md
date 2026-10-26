@@ -66,7 +66,7 @@ cargo build --release -p gateway-app
 sudo ./packaging/install.sh --bin ./target/release/gateway-kit
 ```
 
-安装脚本默认只安装文件和 systemd 单元，不改变主路由。安装后访问 `http://127.0.0.1:7676`，在向导中填写 WAN/LAN 与已授权的加密隧道或远程出口，预览计划并确认应用。紧急旁路：`sudo gateway-kit disable --confirm`；卸载：`sudo ./packaging/uninstall.sh`。
+安装脚本默认只安装文件和 systemd 单元，不改变主路由。默认 UI 监听 `0.0.0.0:7676`，安装时生成 LAN 访问令牌并打印一次；使用 LAN 地址访问并在「访问令牌」页录入令牌。在向导中填写 WAN/LAN 与已授权的加密隧道或远程出口，预览计划并确认应用。生成的防火墙只允许 LAN/本机访问 UI 端口，拒绝 WAN 入站。紧急旁路：`sudo gateway-kit disable --confirm`；卸载：`sudo ./packaging/uninstall.sh`。
 
 示例配置：[`config.example.toml`](config.example.toml)；敏感配置模板：[`secrets.example.toml`](secrets.example.toml)。不要把真实连接 URI、私钥、UI token 或服务器地址写入示例文件、issue、日志或提交记录。
 

@@ -56,7 +56,7 @@ VPS 上的 `3x-ui` + Xray-core **不是本仓库的实现范围**。本产品只
 3. **默认不改主默认路由。** 网关模式必须用户在 UI/CLI 明确确认。本机 SSH、Web UI、agent 自身流量默认 bypass 代理。
 4. **无确认不变更。** 顺序永远是 discover → plan → 用户确认 → apply → health → 失败 rollback。`plan` 在任何 OS 可运行；`apply` 仅 Linux 且需确认。
 5. **密钥隔离：** 密钥只在 `secrets.toml`（或等价，权限 0600），不进 git、不进普通 config、不进 Web 日志。
-6. **Web 默认不暴露：** 默认 bind `127.0.0.1`。监听 LAN 必须认证。WAN 不得默认放行 UI 端口。
+6. **Web 默认 LAN 安全暴露：** 默认 bind `0.0.0.0` 供 LAN 配置，必须认证；由 `gateway_kit` input 规则拒绝 WAN UI 入站。
 7. **可卸载、可旁路：** `disable`/`uninstall` 能撤走本产品对象，尽量恢复观察前状态；失败也不得留下半套 nft 规则。
 8. **可测试：** 所有解析/渲染/校验必须可在无网、非 Linux、无 root 下单测（命令执行必须可注入）。真正改系统的路径必须可跳过或隔离。
 

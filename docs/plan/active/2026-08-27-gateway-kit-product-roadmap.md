@@ -98,7 +98,7 @@ sudo ./packaging/install.sh --bin ./gateway-kit
 3. 创建 `/etc/gateway-kit`、`/var/lib/gateway-kit`、`/var/log/gateway-kit`、`/var/backups/gateway-kit`。
 4. 若无配置，写入安全默认：`proxy.enabled=false`，不启用转发。
 5. 安装并 `enable --now gateway-kit.service`。
-6. 打印本机访问地址：`http://127.0.0.1:7676` 以及检测到的 LAN 地址（若已有）。
+6. 打印 `http://0.0.0.0:7676`、一次性生成的 LAN UI token 以及检测到的 LAN 地址（若已有）。
 7. **不**在安装时 apply 路由/NAT。
 
 ### 5.2 systemd
@@ -132,7 +132,7 @@ sudo ./packaging/install.sh --bin ./gateway-kit
 5. 应用/回滚/旁路
 6. 日志与最近事件（只读）
 
-认证：默认本机 loopback 免密；监听 LAN 时必须设置密码（或 token）。禁止默认 `0.0.0.0` 无认证暴露。
+认证：默认监听 LAN，安装生成 token；loopback/LAN 请求均受 input 规则保护，监听 LAN 时必须 token。WAN 不得默认放行 UI 端口。
 
 ## 6. 分阶段交付
 
@@ -264,7 +264,7 @@ sudo ./packaging/install.sh --bin ./gateway-kit
 | 一装就改默认路由导致 SSH 断 | 安装默认 observe；apply 前检查管理源 IP |
 | sing-box/3x-ui 双头管理 | VPS 只跑 3x-ui；Linux 只跑 sing-box 客户端 |
 | 公网网段当内网 | 校验警告 + 文档 |
-| Web UI 暴露到 WAN | 默认 bind 127.0.0.1；WAN 防火墙不放行 UI 端口 |
+| Web UI 暴露到 WAN | 默认 bind 0.0.0.0；`gateway_kit` input 链拒绝 WAN UI 端口 |
 | 范围膨胀 | Phase 5 之前不做订阅转换、多 WAN、广告过滤 |
 
 ## 11. 建议立即开工顺序

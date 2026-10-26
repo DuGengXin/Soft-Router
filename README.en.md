@@ -41,7 +41,7 @@ cargo build --release -p gateway-app
 sudo ./packaging/install.sh --bin ./target/release/gateway-kit
 ```
 
-Open `http://127.0.0.1:7676`, configure the network and an authorized encrypted remote connection, review the plan, and confirm it. Emergency bypass: `sudo gateway-kit disable --confirm`. Uninstall: `sudo ./packaging/uninstall.sh`.
+The UI listens on `0.0.0.0:7676` by default for LAN setup. Installation generates and prints a LAN UI token once; open the gateway's LAN address and enter that token in the Access Token page. Configure the network and an authorized encrypted remote connection, review the plan, and confirm it. The generated firewall allows the UI port from LAN/loopback and rejects WAN ingress. Emergency bypass: `sudo gateway-kit disable --confirm`. Uninstall: `sudo ./packaging/uninstall.sh`.
 
 ## Repository structure
 

@@ -72,14 +72,17 @@ if [[ ! -f /etc/gateway-kit/config.toml ]]; then
 fi
 if [[ ! -f /etc/gateway-kit/secrets.toml ]]; then
   umask 077
+  UI_TOKEN="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
   cat >/etc/gateway-kit/secrets.toml <<'EOF'
 wireguard_private_key = ""
 wireguard_peer_public_key = ""
 wireguard_preshared_key = ""
-ui_lan_token = ""
+ui_lan_token = "__UI_TOKEN__"
 proxy_uri = ""
 EOF
+  sed -i "s/__UI_TOKEN__/$UI_TOKEN/" /etc/gateway-kit/secrets.toml
   chmod 600 /etc/gateway-kit/secrets.toml
+  echo "generated LAN UI token: $UI_TOKEN"
 fi
 
 systemctl daemon-reload
@@ -87,7 +90,7 @@ systemctl enable --now gateway-kit.service
 systemctl disable gateway-kit-singbox.service >/dev/null 2>&1 || true
 systemctl disable gateway-kit-dnsmasq.service >/dev/null 2>&1 || true
 systemctl disable gateway-kit-forwarding.service >/dev/null 2>&1 || true
-echo "installed. UI: http://127.0.0.1:7676"
+echo "installed. UI listening on 0.0.0.0:7676; open a listed LAN address (use the generated token)"
 echo "network was NOT changed (observe mode). sing-box/dnsmasq units are installed but not started."
 echo "detected IPv4 addresses (install did not assign them):"
 ip -4 -o addr show | awk '{print "  " $2, $4}' || true

@@ -76,6 +76,9 @@ pub async fn serve(
 }
 
 async fn auth(State(state): State<AppState>, req: Request<Body>, next: Next) -> Response {
+    if is_public_ui_path(req.uri().path()) {
+        return next.run(req).await;
+    }
     if !state.require_auth {
         return next.run(req).await;
     }
@@ -91,6 +94,10 @@ async fn auth(State(state): State<AppState>, req: Request<Body>, next: Next) -> 
     } else {
         (StatusCode::UNAUTHORIZED, "token required").into_response()
     }
+}
+
+fn is_public_ui_path(path: &str) -> bool {
+    path == "/" || path.starts_with("/assets/")
 }
 
 fn header_token(headers: &HeaderMap) -> Option<String> {
@@ -350,11 +357,18 @@ fn dataplane_json(paths: &Paths, config: &AppConfig) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
-    use super::ConfirmBody;
+    use super::{ConfirmBody, is_public_ui_path};
 
     #[test]
     fn apply_body_without_confirm_is_false() {
         let body: ConfirmBody = serde_json::from_str("{}").expect("json");
         assert!(!body.confirm);
+    }
+
+    #[test]
+    fn shell_and_assets_are_public_but_api_is_not() {
+        assert!(is_public_ui_path("/"));
+        assert!(is_public_ui_path("/assets/index.js"));
+        assert!(!is_public_ui_path("/api/v1/status"));
     }
 }

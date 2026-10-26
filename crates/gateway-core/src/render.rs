@@ -7,6 +7,10 @@ use gateway_model::{
 };
 use serde_json::json;
 
+mod forwarding;
+mod uri_helpers;
+use uri_helpers::percent_decode;
+
 #[derive(Debug, Clone)]
 struct ProxyEndpoint {
     server: String,
@@ -97,35 +101,6 @@ fn parse_host_port(raw: &str) -> Result<(String, u16), CoreError> {
     Ok((server.to_string(), port))
 }
 
-fn percent_decode(raw: &str) -> String {
-    let bytes = raw.as_bytes();
-    let mut output = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%'
-            && index + 2 < bytes.len()
-            && let (Some(high), Some(low)) =
-                (hex_value(bytes[index + 1]), hex_value(bytes[index + 2]))
-        {
-            output.push(high * 16 + low);
-            index += 3;
-            continue;
-        }
-        output.push(bytes[index]);
-        index += 1;
-    }
-    String::from_utf8_lossy(&output).into_owned()
-}
-
-fn hex_value(value: u8) -> Option<u8> {
-    match value {
-        b'0'..=b'9' => Some(value - b'0'),
-        b'a'..=b'f' => Some(value - b'a' + 10),
-        b'A'..=b'F' => Some(value - b'A' + 10),
-        _ => None,
-    }
-}
-
 fn lan_host_ip(config: &AppConfig) -> String {
     config
         .lan
@@ -204,6 +179,13 @@ table inet {table} {{
     type route hook output priority mangle; policy accept;
     tcp sport {{ {ssh}, {ui} }} return
     tcp dport {{ {ssh}, {ui} }} return
+  }}
+  chain input {{
+    type filter hook input priority filter; policy accept;
+    iifname \"lo\" tcp dport {ui} accept
+    iifname \"{lan}\" tcp dport {ui} accept
+    iifname \"{wan}\" tcp dport {ui} drop
+    tcp dport {ui} drop
   }}
   chain forward {{
     type filter hook forward priority 0; policy accept;
@@ -510,176 +492,12 @@ dhcp-option=6,{lan_ip}
     )
 }
 
-/// Render the interface contract consumed by the Docker FORWARD compatibility unit.
-pub fn render_forwarding_env(config: &AppConfig) -> String {
-    format!(
-        "LAN_IF={}\nWAN_IF={}\n",
-        config.lan.interface, config.wan.interface
-    )
-}
-
-pub fn render_sysctl() -> &'static str {
-    "net.ipv4.ip_forward=1
-net.ipv4.conf.all.route_localnet=1
-"
-}
+pub use forwarding::{render_forwarding_env, render_sysctl};
 
 #[cfg(test)]
-mod tests {
-    use super::{render_singbox, render_singbox_with_secrets};
-    use gateway_model::{AppConfig, Secrets};
-
-    #[test]
-    fn singbox_json_parses() {
-        let cfg = AppConfig {
-            wan: gateway_model::InterfaceConfig {
-                interface: "eth0".into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let raw = render_singbox(&cfg);
-        let value: serde_json::Value = serde_json::from_str(&raw).expect(&raw);
-        assert_eq!(value["route"]["final"], "wg-out");
-        assert_eq!(value["outbounds"][0]["bind_interface"], "eth0");
-        assert_eq!(value["outbounds"][1]["bind_interface"], "wg0");
-        assert_eq!(value["route"]["auto_detect_interface"], false);
-        assert_eq!(
-            value["experimental"]["cache_file"]["path"],
-            "sing-box-cache.db"
-        );
-        let sets = value["route"]["rule_set"].as_array().expect("rule_set");
-        assert!(
-            sets.iter()
-                .all(|s| s["url"].as_str().unwrap_or("").contains("jsdelivr.net")),
-            "{raw}"
-        );
-        assert!(
-            sets.iter().all(|s| !s["url"]
-                .as_str()
-                .unwrap_or("")
-                .contains("githubusercontent")),
-            "{raw}"
-        );
-        assert!(
-            value["route"]["rules"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|r| r.get("ip_cidr").is_some())
-        );
-    }
-
-    #[test]
-    fn singbox_keeps_wan_prefix_when_extra_direct_empty() {
-        let cfg = AppConfig {
-            routing: gateway_model::RoutingConfig {
-                china_direct: false,
-                extra_direct_cidrs: vec![],
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let raw = render_singbox(&cfg);
-        let value: serde_json::Value = serde_json::from_str(&raw).expect(&raw);
-        let rules = value["route"]["rules"].as_array().expect("rules");
-        let has_wan = rules.iter().any(|r| {
-            r.get("ip_cidr")
-                .and_then(|v| v.as_array())
-                .is_some_and(|arr| arr.iter().any(|c| c.as_str() == Some("192.168.40.0/24")))
-        });
-        assert!(has_wan, "{raw}");
-        assert_eq!(value["route"]["final"], "wg-out");
-    }
-
-    #[test]
-    fn singbox_renders_vless_reality_proxy_uri_without_wireguard() {
-        let cfg = AppConfig::default();
-        let secrets = Secrets {
-            proxy_uri: Some("vless://11111111-1111-1111-1111-111111111111@example.com:443?sni=example.org&security=reality&pbk=public-key&sid=short-id&fp=chrome&flow=xtls-rprx-vision".into()),
-            ..Secrets::default()
-        };
-        let raw = render_singbox_with_secrets(&cfg, &secrets).expect("valid proxy URI");
-        let value: serde_json::Value = serde_json::from_str(&raw).expect(&raw);
-        assert_eq!(value["route"]["final"], "proxy-out");
-        assert!(value["inbounds"][0].get("sniff").is_none());
-        assert_eq!(value["route"]["rules"][0]["action"], "hijack-dns");
-        assert_eq!(value["route"]["rules"][1]["action"], "sniff");
-        assert_eq!(value["dns"]["final"], "proxy-dns");
-        assert_eq!(value["dns"]["strategy"], "ipv4_only");
-        assert_eq!(value["dns"]["rules"][0]["rule_set"][0], "geosite-cn");
-        assert_eq!(value["dns"]["rules"][0]["rule_set"][1], "geosite-private");
-        assert_eq!(value["dns"]["rules"][0]["server"], "direct-dns-0");
-        assert_eq!(value["dns"]["rules"][1]["server"], "proxy-dns");
-        assert_eq!(value["outbounds"][1]["type"], "vless");
-        assert_eq!(value["outbounds"][1]["server"], "example.com");
-        assert_eq!(
-            value["outbounds"][1]["uuid"],
-            "11111111-1111-1111-1111-111111111111"
-        );
-        assert_eq!(
-            value["outbounds"][1]["tls"]["reality"]["public_key"],
-            "public-key"
-        );
-        assert_eq!(value["outbounds"][1]["flow"], "xtls-rprx-vision");
-        assert!(value["outbounds"][1].get("bind_interface").is_none());
-    }
-
-    #[test]
-    fn singbox_rejects_malformed_proxy_uri() {
-        let cfg = AppConfig::default();
-        let secrets = Secrets {
-            proxy_uri: Some("https://example.com/not-vless".into()),
-            ..Secrets::default()
-        };
-        assert!(render_singbox_with_secrets(&cfg, &secrets).is_err());
-    }
-}
+#[path = "render/tests.rs"]
+mod tests;
 
 #[cfg(all(test, target_os = "linux"))]
-mod linux_nft {
-    use super::render_nftables;
-    use gateway_model::AppConfig;
-    use std::process::Command;
-
-    #[test]
-    fn nft_check_accepts_gateway_table() {
-        let mut cfg = AppConfig {
-            wan: gateway_model::InterfaceConfig {
-                interface: "eth0".into(),
-                ..Default::default()
-            },
-            lan: gateway_model::InterfaceConfig {
-                interface: "eth1".into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        cfg.port_forwards.push(gateway_model::PortForward {
-            enabled: true,
-            protocol: "tcp".into(),
-            wan_port: 8080,
-            lan_ip: "192.168.50.10".into(),
-            lan_port: 80,
-        });
-        let body = render_nftables(&cfg);
-        let path = std::env::temp_dir().join("gateway-kit-nft-check.conf");
-        std::fs::write(&path, &body).expect("write nft fixture");
-        let output = Command::new("nft")
-            .args(["-c", "-f", path.to_str().expect("utf8 path")])
-            .output();
-        let output = match output {
-            Ok(output) => output,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                panic!("nft not installed; CI must apt-get install nftables");
-            }
-            Err(error) => panic!("nft: {error}"),
-        };
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if stderr.contains("Operation not permitted") || stderr.contains("Permission denied") {
-            eprintln!("skipping nft runtime check without required kernel permissions");
-            return;
-        }
-        assert!(output.status.success(), "nft -c failed: {}", stderr);
-    }
-}
+#[path = "render/linux_nft_tests.rs"]
+mod linux_nft;
