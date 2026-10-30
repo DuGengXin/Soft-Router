@@ -1,0 +1,17 @@
+[Unit]
+Description=Gateway-Kit Xray VLESS client and local SOCKS bridge
+Wants=network-online.target
+After=network-online.target gateway-kit.service
+ConditionPathExists=/etc/gateway-kit/generated/xray.json
+
+[Service]
+Type=simple
+WorkingDirectory=/etc/gateway-kit/generated
+ExecStart=/bin/sh -c 'bin=$(command -v xray) || bin=/usr/local/bin/xray; exec "$bin" run -c /etc/gateway-kit/generated/xray.json'
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

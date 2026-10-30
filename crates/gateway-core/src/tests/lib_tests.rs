@@ -11,7 +11,6 @@ fn example_config_parses_as_observe() {
     assert_eq!(config.firewall.table_name, "gateway_kit");
     assert_eq!(config.routing.policy_table_id, 51820);
     let secrets = gateway_model::Secrets {
-        ui_lan_token: Some("token".into()),
         ..Default::default()
     };
     config.validate(&secrets).unwrap();
@@ -236,7 +235,6 @@ fn observe_plan_is_observe_only() {
     let plan = build_plan(
         &AppConfig::default(),
         &gateway_model::Secrets {
-            ui_lan_token: Some("token".into()),
             ..Default::default()
         },
         &PreflightReport::default(),

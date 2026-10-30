@@ -15,7 +15,8 @@ pub(crate) use db::CURRENT_SCHEMA_VERSION;
 pub use db::*;
 pub use discovery::discover_host;
 pub use health::{
-    check_applied, check_applied_with_artifacts, check_applied_with_cache, probe_uplinks,
+    check_applied, check_applied_with_artifacts, check_applied_with_cache,
+    check_applied_with_xray_artifact, probe_uplinks,
 };
 pub use monitor::sample_host;
 pub use plan::build_plan;

@@ -1,7 +1,9 @@
 //! Post-apply health. Does not parse secrets.
 
 use crate::command::CommandRunner;
-use gateway_model::{AppConfig, DNS_PROXY_PORT, HealthSnapshot, HealthStatus, TPROXY_PORT};
+use gateway_model::{
+    AppConfig, DNS_PROXY_PORT, HealthSnapshot, HealthStatus, TPROXY_PORT, TunnelTransport,
+};
 use std::path::Path;
 
 pub fn check_applied(
@@ -30,9 +32,35 @@ pub fn check_applied_with_artifacts(
     singbox_config: Option<&Path>,
     geo_cache: Option<&Path>,
 ) -> HealthSnapshot {
+    check_applied_with_xray_artifact(
+        config,
+        runner,
+        require_tproxy,
+        singbox_config,
+        geo_cache,
+        None,
+    )
+}
+
+/// Check generated Xray configuration, its service, and local SOCKS listener when configured.
+pub fn check_applied_with_xray_artifact(
+    config: &AppConfig,
+    runner: &impl CommandRunner,
+    require_tproxy: bool,
+    singbox_config: Option<&Path>,
+    geo_cache: Option<&Path>,
+    xray_config: Option<&Path>,
+) -> HealthSnapshot {
     let mut failed = Vec::new();
     let mut notes = Vec::new();
-    let (wan_uplink, tunnel_uplink, mut link_notes) = probe_uplinks(config, runner);
+    let transport = if config.wireguard.enabled {
+        TunnelTransport::Wireguard
+    } else if xray_config.is_some_and(|path| path.is_file()) {
+        TunnelTransport::Vless
+    } else {
+        TunnelTransport::None
+    };
+    let (wan_uplink, tunnel_uplink, mut link_notes) = probe_uplinks(config, runner, transport);
     notes.append(&mut link_notes);
     if require_tproxy && wan_uplink == "down" {
         failed.push("WAN gateway is unreachable".into());
@@ -119,6 +147,30 @@ pub fn check_applied_with_artifacts(
             Err(error) => failed.push(error.to_string()),
         }
         check_unit(runner, "gateway-kit-singbox", &mut failed);
+        if let Some(path) = xray_config.filter(|path| path.is_file()) {
+            match runner.run(
+                "xray",
+                &["run", "-test", "-c", path.to_str().unwrap_or("xray.json")],
+            ) {
+                Ok(out) if out.status == Some(0) => {}
+                Ok(out) => failed.push(format!("Xray config invalid: {}", out.stderr)),
+                Err(error) => failed.push(format!("Xray config check: {error}")),
+            }
+            check_unit(runner, "gateway-kit-xray", &mut failed);
+            match runner.run("ss", &["-lntu"]) {
+                Ok(out)
+                    if out.status == Some(0)
+                        && out
+                            .stdout
+                            .contains(&format!(":{}", gateway_model::XRAY_SOCKS_PORT)) => {}
+                Ok(out) if out.status == Some(0) => failed.push(format!(
+                    "Xray SOCKS {} not listening",
+                    gateway_model::XRAY_SOCKS_PORT
+                )),
+                Ok(out) => failed.push(format!("Xray SOCKS listener check: {}", out.stderr)),
+                Err(error) => failed.push(format!("Xray SOCKS listener check: {error}")),
+            }
+        }
         check_unit(runner, "gateway-kit-forwarding", &mut failed);
         if config.dhcp.enabled {
             check_unit(runner, "gateway-kit-dnsmasq", &mut failed);
@@ -163,10 +215,11 @@ fn check_unit(runner: &impl CommandRunner, unit: &str, failed: &mut Vec<String>)
     }
 }
 
-/// WAN gateway ping and WireGuard handshake. Safe in observe mode.
+/// WAN gateway ping and tunnel reachability. Safe in observe mode.
 pub fn probe_uplinks(
     config: &AppConfig,
     runner: &impl CommandRunner,
+    transport: TunnelTransport,
 ) -> (String, String, Vec<String>) {
     let mut notes = Vec::new();
     let wan_uplink = if let Some(gw) = config
@@ -186,20 +239,26 @@ pub fn probe_uplinks(
     } else {
         "unknown".into()
     };
-    let tunnel_uplink = if config.wireguard.enabled && !config.wireguard.interface.is_empty() {
-        match runner.run(
-            "wg",
-            &["show", &config.wireguard.interface, "latest-handshakes"],
-        ) {
-            Ok(out) if out.status == Some(0) && handshake_never(&out.stdout) => {
-                notes.push("wireguard has no handshake yet (VPS/endpoint may be down)".into());
-                "down".into()
+    let tunnel_uplink = match transport {
+        TunnelTransport::Wireguard if !config.wireguard.interface.is_empty() => {
+            match runner.run(
+                "wg",
+                &["show", &config.wireguard.interface, "latest-handshakes"],
+            ) {
+                Ok(out) if out.status == Some(0) && handshake_never(&out.stdout) => {
+                    notes.push("wireguard has no handshake yet (VPS/endpoint may be down)".into());
+                    "down".into()
+                }
+                Ok(out) if out.status == Some(0) => "up".into(),
+                _ => "unknown".into(),
             }
-            Ok(out) if out.status == Some(0) => "up".into(),
-            _ => "unknown".into(),
         }
-    } else {
-        "idle".into()
+        TunnelTransport::Wireguard => "idle".into(),
+        TunnelTransport::Vless => {
+            // Xray owns the VLESS handshake; the post-apply check covers its service and SOCKS listener.
+            "unknown".into()
+        }
+        TunnelTransport::None => "idle".into(),
     };
     (wan_uplink, tunnel_uplink, notes)
 }

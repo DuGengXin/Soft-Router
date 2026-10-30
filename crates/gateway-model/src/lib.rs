@@ -19,6 +19,8 @@ pub const TPROXY_PORT: u16 = 7895;
 pub const TPROXY_MARK: u32 = 1;
 /// Loopback port used to hand LAN DNS from dnsmasq to sing-box.
 pub const DNS_PROXY_PORT: u16 = 5353;
+/// Loopback SOCKS5 bridge from sing-box routing to the Xray VLESS client.
+pub const XRAY_SOCKS_PORT: u16 = 10808;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ValidateError {
@@ -47,9 +49,37 @@ pub struct AppConfig {
     #[serde(default)]
     pub routing: RoutingConfig,
     #[serde(default)]
+    pub dns: DnsConfig,
+    #[serde(default)]
     pub ui: UiConfig,
     #[serde(default)]
     pub port_forwards: Vec<PortForward>,
+}
+
+/// The single overseas transport in use. WireGuard and VLESS are mutually exclusive.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TunnelTransport {
+    None,
+    Wireguard,
+    Vless,
+}
+
+impl AppConfig {
+    /// Resolve the active overseas transport from config and stored secrets.
+    pub fn tunnel_transport(&self, secrets: &Secrets) -> TunnelTransport {
+        if self.wireguard.enabled {
+            TunnelTransport::Wireguard
+        } else if secrets
+            .proxy_uri
+            .as_deref()
+            .is_some_and(|uri| !uri.trim().is_empty())
+        {
+            TunnelTransport::Vless
+        } else {
+            TunnelTransport::None
+        }
+    }
 }
 
 impl Default for AppConfig {
@@ -75,6 +105,7 @@ impl Default for AppConfig {
             firewall: FirewallConfig::default(),
             wireguard: WireGuardConfig::default(),
             routing: RoutingConfig::default(),
+            dns: DnsConfig::default(),
             ui: UiConfig::default(),
             port_forwards: Vec::new(),
         }
@@ -93,13 +124,6 @@ impl AppConfig {
             return Err(ValidateError::Message(format!(
                 "policy table id must be {POLICY_TABLE_ID}"
             )));
-        }
-        if !is_loopback_bind(&self.ui.bind)
-            && secrets.ui_lan_token.as_ref().is_none_or(|t| t.is_empty())
-        {
-            return Err(ValidateError::Message(
-                "non-loopback UI bind requires secrets.ui_lan_token".into(),
-            ));
         }
         if let Some(addr) = &self.lan.address {
             let lan = parse_ipv4_cidr(addr)?;

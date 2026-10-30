@@ -1,29 +1,32 @@
 //! Embedded Web UI and JSON API. Observe-mode safe: apply still requires confirm.
 
 use super::service::AppService;
+use crate::auth::{self, AuthState};
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use gateway_core::{
-    Paths, SystemCommandRunner, check_applied_with_artifacts, default_or_load_config,
+    Paths, SystemCommandRunner, check_applied_with_xray_artifact, default_or_load_config,
     init_database, load_secrets, probe_uplinks, recent_events, sample_host, save_secrets,
     validate_proxy_uri,
 };
 use gateway_model::{
-    AppConfig, OperatingMode, SecretsPatch, is_loopback_bind, parse_wireguard_blob, wan_direct_cidr,
+    AppConfig, OperatingMode, SecretsPatch, parse_wireguard_blob, wan_direct_cidr,
 };
 use rust_embed::Embed;
 use serde::Deserialize;
+use std::net::SocketAddr;
+use std::sync::Arc;
 
 #[derive(Clone)]
 struct AppState {
     paths: Paths,
     service: AppService,
-    require_auth: bool,
+    auth: Arc<AuthState>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -43,18 +46,21 @@ pub async fn serve(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let config = default_or_load_config(&paths.config)?;
     let bind = listen_override.unwrap_or_else(|| format!("{}:{}", config.ui.bind, config.ui.port));
-    let bind_host = bind
-        .rsplit_once(':')
-        .map(|(h, _)| h)
-        .unwrap_or(bind.as_str());
     let state = AppState {
         service: AppService::new(paths.clone()),
-        require_auth: !is_loopback_bind(bind_host),
+        auth: Arc::new(AuthState::new(paths.secrets.clone())),
         paths,
     };
     let app = Router::new()
         .route("/", get(index))
         .route("/assets/{*path}", get(dist_asset))
+        .route("/api/v1/auth/login", post(login))
+        .route("/api/v1/auth/logout", post(logout))
+        .route("/api/v1/auth/session", get(auth_session))
+        .route(
+            "/api/v1/auth/credentials",
+            axum::routing::put(change_credentials),
+        )
         .route("/api/v1/health", get(health))
         .route("/api/v1/status", get(status))
         .route("/api/v1/monitor", get(monitor))
@@ -67,48 +73,44 @@ pub async fn serve(
         .route("/api/v1/apply", post(apply))
         .route("/api/v1/rollback", post(do_rollback))
         .route("/api/v1/disable", post(do_disable))
-        .layer(middleware::from_fn_with_state(state.clone(), auth))
+        .layer(middleware::from_fn_with_state(state.clone(), auth_gate))
         .with_state(state.clone());
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     eprintln!("gateway-kit ui http://{bind} (observe-safe until apply --confirm)");
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 
-async fn auth(State(state): State<AppState>, req: Request<Body>, next: Next) -> Response {
-    if is_public_ui_path(req.uri().path()) {
-        return next.run(req).await;
-    }
-    if !state.require_auth {
-        return next.run(req).await;
-    }
-    let token = load_secrets(&state.paths.secrets)
-        .ok()
-        .and_then(|s| s.ui_lan_token)
-        .unwrap_or_default();
-    if token.is_empty() {
-        return (StatusCode::FORBIDDEN, "LAN token missing").into_response();
-    }
-    if header_token(req.headers()).as_deref() == Some(token.as_str()) {
-        next.run(req).await
-    } else {
-        (StatusCode::UNAUTHORIZED, "token required").into_response()
-    }
+async fn auth_gate(State(state): State<AppState>, request: Request<Body>, next: Next) -> Response {
+    auth::middleware(state.auth, request, next).await
 }
 
-fn is_public_ui_path(path: &str) -> bool {
-    path == "/" || path.starts_with("/assets/")
+async fn login(
+    State(state): State<AppState>,
+    ConnectInfo(address): ConnectInfo<SocketAddr>,
+    Json(body): Json<auth::LoginBody>,
+) -> Response {
+    auth::login(state.auth, address, body).await
 }
 
-fn header_token(headers: &HeaderMap) -> Option<String> {
-    if let Some(value) = headers.get("x-gateway-token") {
-        return value.to_str().ok().map(str::to_string);
-    }
-    headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .map(str::to_string)
+async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    auth::logout(state.auth, headers).await
+}
+
+async fn auth_session(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    auth::session(state.auth, headers).await
+}
+
+async fn change_credentials(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<auth::CredentialsBody>,
+) -> Response {
+    auth::change_credentials(state.auth, headers, body).await
 }
 
 #[derive(Embed)]
@@ -200,14 +202,15 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
 
 async fn status(State(state): State<AppState>) -> impl IntoResponse {
     match state.service.load_all() {
-        Ok((config, _, report)) => {
+        Ok((config, secrets, report)) => {
+            let transport = config.tunnel_transport(&secrets);
             let (wan_uplink, tunnel_uplink, link_notes) =
-                probe_uplinks(&config, &SystemCommandRunner);
+                probe_uplinks(&config, &SystemCommandRunner, transport);
             Json(serde_json::json!({
                 "mode": config.mode,
                 "wan": config.wan,
                 "lan": config.lan,
-                "wireguard": { "enabled": config.wireguard.enabled, "interface": config.wireguard.interface },
+                "tunnel": { "transport": transport, "wireguard_interface": config.wireguard.interface },
                 "routing": { "china_direct": config.routing.china_direct },
                 "wan_direct_cidr": wan_direct_cidr(&config),
                 "wan_uplink": wan_uplink,
@@ -345,30 +348,25 @@ fn dataplane_json(paths: &Paths, config: &AppConfig) -> serde_json::Value {
     }
     let geo_cache = paths.generated_dir.join("sing-box-cache.db");
     let singbox_config = paths.generated_dir.join("sing-box.json");
-    serde_json::to_value(check_applied_with_artifacts(
+    let xray_config = paths.generated_dir.join("xray.json");
+    serde_json::to_value(check_applied_with_xray_artifact(
         config,
         &SystemCommandRunner,
         paths.manages_host_units(),
         Some(&singbox_config),
         Some(&geo_cache),
+        Some(&xray_config),
     ))
     .unwrap_or_else(|_| serde_json::json!({ "status": "unhealthy", "message": "serialize failed" }))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ConfirmBody, is_public_ui_path};
+    use super::ConfirmBody;
 
     #[test]
     fn apply_body_without_confirm_is_false() {
         let body: ConfirmBody = serde_json::from_str("{}").expect("json");
         assert!(!body.confirm);
-    }
-
-    #[test]
-    fn shell_and_assets_are_public_but_api_is_not() {
-        assert!(is_public_ui_path("/"));
-        assert!(is_public_ui_path("/assets/index.js"));
-        assert!(!is_public_ui_path("/api/v1/status"));
     }
 }

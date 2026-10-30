@@ -7,13 +7,13 @@
 
 **Goal:** 用与 1Panel 同族的 Vue 3 + Vite + Element Plus 重做控制面四页，开发可用 npm；`gateway-kit` 发布仍为单二进制，**运行时不要求 npm**。
 
-**Architecture:** UI 源码在 `crates/gateway-app/ui/`。`build.rs` 在编译 `gateway-app` 时 `npm ci && npm run build`，产物 `ui/dist` 用 `rust-embed` 嵌入。Axum 只服务 `/` 与 hashed `/assets/*`。信息架构不变：壳 + 概览 / 接口与分流 / 计划与变更 / 访问令牌。客户端用 hash 路由，避免多路径 fallback。
+**Architecture:** UI 源码在 `crates/gateway-app/ui/`。`build.rs` 在编译 `gateway-app` 时 `npm ci && npm run build`，产物 `ui/dist` 用 `rust-embed` 嵌入。Axum 服务单页 UI 与 hashed `/assets/*`。信息架构：登录 / 概览 / 接口与分流 / 计划与变更 / 账号与安全。客户端用 hash 路由，避免多路径 fallback。
 
 **Tech Stack:** Vue 3（Composition API）· TypeScript · Vite · Vue Router（hash）· Element Plus · `fetch`（不引入 axios/Pinia/i18n）· Node ≥ 20（仅构建）· `rust-embed`
 
 ## Global Constraints
 
-- 不变量：discover → plan → 确认 → apply；密钥只进 `secrets.toml`；非回环 bind 必须 token。
+- 不变量：discover → plan → 确认 → apply；密钥只进 `secrets.toml`；Web API 通过管理员用户名/密码会话认证。
 - `docs/architecture/coding-rules.md`：发布 UI 运行时不得要求 npm；构建 `gateway-app` **需要** Node。
 - 禁止新 crate `gateway-web`；UI 仍属 `gateway-app`。
 - 不改 JSON API 契约；前端适配现有 `/api/v1/*`。
@@ -50,7 +50,7 @@ crates/gateway-app/ui/
   src/
     main.ts
     App.vue                 # 壳：侧栏 / 抽屉 / 顶栏 / <router-view>
-    api/client.ts           # token 头、错误
+    api/client.ts           # 同源会话 cookie、错误
     overview/OverviewPage.vue
     wizard/WizardPage.vue
     plan/PlanPage.vue
@@ -117,7 +117,7 @@ Debug：改 UI 后需 `npm run build` 或再 `cargo build`（build.rs 会编）�
 
 不做：浏览器打真实 `/api`、改 nft、起 `--local agent`。
 
-网关机器验收：四页打开、监控刷新、向导保存、计划预览/确认/回滚/旁路、LAN token。
+网关机器验收：页面打开、监控刷新、向导保存、计划预览/确认/回滚/旁路、账号登录与密码修改。
 
 ---
 

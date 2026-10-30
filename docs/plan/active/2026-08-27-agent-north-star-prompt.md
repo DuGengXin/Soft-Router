@@ -56,7 +56,7 @@ VPS 上的 `3x-ui` + Xray-core **不是本仓库的实现范围**。本产品只
 3. **默认不改主默认路由。** 网关模式必须用户在 UI/CLI 明确确认。本机 SSH、Web UI、agent 自身流量默认 bypass 代理。
 4. **无确认不变更。** 顺序永远是 discover → plan → 用户确认 → apply → health → 失败 rollback。`plan` 在任何 OS 可运行；`apply` 仅 Linux 且需确认。
 5. **密钥隔离：** 密钥只在 `secrets.toml`（或等价，权限 0600），不进 git、不进普通 config、不进 Web 日志。
-6. **Web 默认 LAN 安全暴露：** 默认 bind `0.0.0.0` 供 LAN 配置，必须认证；由 `gateway_kit` input 规则拒绝 WAN UI 入站。
+6. **Web 访问控制：** 默认 bind `0.0.0.0`，非 loopback API 必须认证；Gateway apply 后由 `gateway_kit` input 规则仅允许配置的 LAN/WAN 网卡访问 UI 端口。
 7. **可卸载、可旁路：** `disable`/`uninstall` 能撤走本产品对象，尽量恢复观察前状态；失败也不得留下半套 nft 规则。
 8. **可测试：** 所有解析/渲染/校验必须可在无网、非 Linux、无 root 下单测（命令执行必须可注入）。真正改系统的路径必须可跳过或隔离。
 
@@ -102,7 +102,7 @@ gateway-app            # CLI + HTTP + systemd 入口 + 嵌入 UI
 | P4 真 Plan | 渲染 nft/wg/sing-box/dhcp；`plan --explain` | 快照测试 |
 | P5 Apply | 确认后变更 + 代际 + rollback + disable | Linux netns 或 root 集成；失败必回滚 |
 | P6 分流 | 国内直连、境外走 WG；本机 bypass | 对测：国内不进隧道 |
-| P7 Web UI | 向导闭环；LAN 认证 | 不靠 CLI 能 apply/旁路 |
+| P7 Web UI | 向导闭环；LAN/WAN API token 认证 | 不靠 CLI 能 apply/旁路 |
 | P8 兼容发布 | NM/Docker 矩阵；aarch64；用户文档 | 清单全绿 → 打 alpha tag |
 
 **当前允许写代码的最高阶段 = 状态指针中的阶段 + 其下一阶段。** 禁止跳做 P7 界面充数，或先写 apply 再补 plan。

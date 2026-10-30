@@ -118,6 +118,28 @@ pub(super) fn dataplane_binaries(
             });
         }
     }
+    if config.mode == OperatingMode::Gateway && !config.wireguard.enabled {
+        probe_bin(report, runner, "xray", "xray", &["version"]);
+        probe_bin(
+            report,
+            runner,
+            "xray-local",
+            "/usr/local/bin/xray",
+            &["version"],
+        );
+        if !bin_detected(report, "xray") && !bin_detected(report, "xray-local") {
+            report.conflicts.push(Conflict {
+                id: "missing-xray".into(),
+                severity,
+                resource_id: "bin:xray".into(),
+                title: "Xray-core is not installed".into(),
+                detail: "VLESS uses the Xray-core client through a local SOCKS bridge".into(),
+                recommendation:
+                    "Install the official Xray-core binary into PATH or /usr/local/bin before confirm apply."
+                        .into(),
+            });
+        }
+    }
     if config.dhcp.enabled {
         probe_bin(report, runner, "dnsmasq", "dnsmasq", &["--version"]);
         if !bin_detected(report, "dnsmasq") {

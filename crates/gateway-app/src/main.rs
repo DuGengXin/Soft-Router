@@ -1,11 +1,12 @@
 //! Gateway-Kit CLI and agent.
 
+mod auth;
 mod http;
 mod service;
 
 use clap::{Parser, Subcommand};
 use gateway_core::{
-    Paths, SystemCommandRunner, check_applied_with_artifacts, default_or_load_config, disable,
+    Paths, SystemCommandRunner, check_applied_with_xray_artifact, default_or_load_config, disable,
     discover_host, init_database, latest_successful_generation, load_secrets, persist_preflight,
     record_event, restore_on_boot, save_config,
 };
@@ -45,6 +46,10 @@ enum Command {
         #[arg(long)]
         confirm: bool,
     },
+    /// Create the first administrator account and print its one-time password.
+    AuthBootstrap,
+    /// Reset the administrator password and require a change at next login.
+    AuthResetPassword,
     Agent {
         #[arg(long)]
         once: bool,
@@ -121,6 +126,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let result = AppService::new(paths.clone()).disable(confirm)?;
             println!("disable: {}", result.message);
         }
+        Command::AuthBootstrap => print_bootstrap_password(&paths, false)?,
+        Command::AuthResetPassword => print_bootstrap_password(&paths, true)?,
         Command::Agent { once, listen } => {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(agent_main(paths, once, listen))?;
@@ -134,6 +141,18 @@ fn scan(
 ) -> Result<(AppConfig, gateway_model::PreflightReport), Box<dyn std::error::Error>> {
     let (config, _, report) = scan_full(paths)?;
     Ok((config, report))
+}
+
+fn print_bootstrap_password(paths: &Paths, reset: bool) -> Result<(), Box<dyn std::error::Error>> {
+    match auth::bootstrap_admin(&paths.secrets, reset)? {
+        Some((username, password)) => {
+            println!("administrator username: {username}");
+            println!("temporary password (shown once): {password}");
+            println!("sign in and set a new password before managing the gateway");
+        }
+        None => println!("administrator account is already configured; no changes made"),
+    }
+    Ok(())
 }
 
 fn scan_full(
@@ -163,6 +182,12 @@ async fn agent_main(
         save_config(&paths.config, &AppConfig::default())?;
     }
     let config = default_or_load_config(&paths.config)?;
+    if let Some((username, password)) = auth::bootstrap_admin(&paths.secrets, false)? {
+        eprintln!("Gateway-Kit first login for {username}; temporary password: {password}");
+        eprintln!(
+            "change this password after signing in; the agent journal contains this one-time value"
+        );
+    }
     let secrets = load_secrets(&paths.secrets)?;
     let report = discover_host(&config, &SystemCommandRunner);
     let conn = init_database(&paths.state_db)?;
@@ -207,12 +232,14 @@ async fn health_watch(paths: Paths) {
         }
         let geo_cache = paths.generated_dir.join("sing-box-cache.db");
         let singbox_config = paths.generated_dir.join("sing-box.json");
-        let health = check_applied_with_artifacts(
+        let xray_config = paths.generated_dir.join("xray.json");
+        let health = check_applied_with_xray_artifact(
             &config,
             &SystemCommandRunner,
             paths.manages_host_units(),
             Some(&singbox_config),
             Some(&geo_cache),
+            Some(&xray_config),
         );
         if health.status == gateway_model::HealthStatus::Healthy {
             strikes = 0;

@@ -14,18 +14,18 @@ sudo ./packaging/install.sh --bin ./target/release/gateway-kit
 ```text
 工作 PC → AP（关 DHCP/NAT）→ Linux LAN（默认 192.168.50.1/24）
 Linux WAN（默认 192.168.40.2/24）→ 路由器 A → 国内直连
-Linux WireGuard 或 sing-box VLESS → 用户 VPS（3x-ui/Xray 不在本仓库）
+Linux WireGuard 或 Xray-core VLESS → 用户 VPS（3x-ui/Xray 服务端不在本仓库）
 ```
 
-装完打印监听地址 `0.0.0.0:7676`、随机生成的 LAN UI 令牌以及当时 `ip -4` 看到的地址（只读，不改地址）；使用列出的 LAN 地址访问。
-在向导里填写 WAN/LAN，以及 WireGuard 地址/Endpoint/密钥，或在「隧道」页粘贴服务端生成的 VLESS/Xray 链接文本；敏感内容只写入 `/etc/gateway-kit/secrets.toml`（0600），API 不回显明文。两种境外出口二选一。默认 LAN 监听必须使用安装时生成的 `ui_lan_token`，并在「访问令牌」页把同一令牌存进浏览器；没有令牌时请求返回拒绝，配置校验也会阻止应用。
+装完打印监听地址 `0.0.0.0:7676`、一次性管理员用户名和随机临时密码，以及当时 `ip -4` 看到的地址（只读，不改地址）。完成 Gateway apply 后，可从配置的 LAN/WAN 网卡访问该端口。首次登录必须修改密码；后续可在「账号与安全」页改用户名或密码。遗失密码时，在网关本机运行 `sudo gateway-kit auth-reset-password`。管理 UI 使用 HTTP；跨公网访问时应通过 HTTPS 反向代理或 VPN 保护连接，避免凭据和会话明文传输。若由 HTTPS 反向代理终止 TLS，可在 `gateway-kit` systemd drop-in 中设置 `GATEWAY_KIT_COOKIE_SECURE=1`，让会话 Cookie 仅通过 HTTPS 发送；不要在直接 HTTP 访问时设置此项。
+在向导里填写 WAN/LAN，以及 WireGuard 地址/Endpoint/密钥，或在「隧道」页粘贴服务端生成的 VLESS/Xray 链接文本；VLESS 方案要求系统预装 Xray-core，Gateway-Kit 会将其作为本机 SOCKS5 桥接，sing-box 继续处理 TProxy 与分流。敏感内容只写入 `/etc/gateway-kit/secrets.toml`（0600），API 不回显明文。两种境外出口二选一。
 
-向导必须把运行模式改成「网关」，并配置 WireGuard 或 VLESS 链接，保存后再预览计划、确认应用。仍为观察模式时确认应用不会改网络。网关模式且检测到旧版 Router、PATH 中没有 `sing-box`（或启用 WG 却没有 `wg`、启用 DHCP 却没有 `dnsmasq`）时，计划为 blocked，不会改网络。确认后才会：
+向导必须把运行模式改成「网关」，并配置 WireGuard 或 VLESS 链接，保存后再预览计划、确认应用。仍为观察模式时确认应用不会改网络。网关模式且检测到旧版 Router、PATH 中没有 `sing-box`（VLESS 出口还需要 Xray-core；启用 WG 却没有 `wg`、启用 DHCP 却没有 `dnsmasq`）时，计划为 blocked，不会改网络。确认后才会：
 
 - `ip addr replace` 到你指定的网卡（仍不改主表 default）
 - 加载 nft 表 `gateway_kit` 与策略表 `51820`
-- 在 `gateway_kit` 自有 input 链中只允许 LAN/loopback 访问 UI 端口，拒绝 WAN 入站，不修改 Docker/UFW/firewalld 或 SSH 规则
-- 按需启动本产品的 sing-box / dnsmasq 单元
+- 在 `gateway_kit` 自有 input 链中允许配置的 LAN/WAN/loopback 网卡访问 UI 端口；其它接口仍拒绝，不修改 Docker/UFW/firewalld 或 SSH 规则
+- 按需启动本产品的 Xray-core / sing-box / dnsmasq 单元
 
 WAN 上原有的默认路由应仍指向路由器 A（国内直连）。本产品不替换它。
 
@@ -43,7 +43,7 @@ cargo build --release -p gateway-app --target aarch64-unknown-linux-gnu
 
 1. `install.sh --dry-run` 后正式安装，`systemctl is-enabled gateway-kit` 为 enabled，默认路由未变。
 2. Web 向导填 WAN/LAN/WG 或 VLESS 链接，预览 plan，确认 apply。
-3. LAN 客户端能 DHCP，网关和 DNS 均为 Linux LAN 地址；DNS 由 sing-box 统一接管并按配置出口查询，国内 IP 出 WAN，境外经已配置的出口。LAN 的 TCP/UDP 53 会被网关强制接管。首次 apply 时 sing-box 经 WAN 从 jsDelivr 拉 geoip/geosite（不走 GitHub raw）；成功后缓存在 `/etc/gateway-kit/generated/sing-box-cache.db`，重启不必再下载。
+3. LAN 客户端能 DHCP，网关和 DNS 均为 Linux LAN 地址；DNS 由 sing-box 统一接管并按配置出口查询，国内 IP 出 WAN，境外经已配置的出口。LAN 的 TCP/UDP 53 会被网关强制接管。首次 apply 时 sing-box 经 WAN 从 jsDelivr 拉 geoip/geosite（不走 GitHub raw）；成功后缓存在 `/etc/gateway-kit/generated/sing-box-cache.db`，重启不必再下载。规则集 `update_interval` 固定为 1 天，sing-box 会定期刷新并在缓存有效时沿用旧副本。
 4. 重启后恢复成功代际；`disable --confirm` 后 SSH 仍可用。
 
 启动可靠性：确认应用后，Gateway-Kit 会启用控制面、转发兼容、sing-box 和 dnsmasq

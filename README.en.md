@@ -23,7 +23,7 @@ The project does not provide cloud nodes, accounts, content services, or telecom
 
 Observation mode is the default. Doctor, the Web UI, and the agent are read-only: they do not replace the default route, enable NAT, or bring up a tunnel. Network mutation requires plan review and explicit `apply --confirm` confirmation; failures converge to a safe bypass.
 
-Only example configuration is committed. Never commit real configuration, secrets, databases, logs, generated files, build artifacts, diagnostics, connection URIs, private keys, UI tokens, or server credentials. Store secrets in `/etc/gateway-kit/secrets.toml` with mode `0600`; the API does not echo secret values.
+Only example configuration is committed. Never commit real configuration, secrets, databases, logs, generated files, build artifacts, diagnostics, connection URIs, private keys, administrator credentials, or server credentials. Store secrets in `/etc/gateway-kit/secrets.toml` with mode `0600`; the API does not echo secret values.
 
 ## Quick start
 
@@ -41,7 +41,7 @@ cargo build --release -p gateway-app
 sudo ./packaging/install.sh --bin ./target/release/gateway-kit
 ```
 
-The UI listens on `0.0.0.0:7676` by default for LAN setup. Installation generates and prints a LAN UI token once; open the gateway's LAN address and enter that token in the Access Token page. Configure the network and an authorized encrypted remote connection, review the plan, and confirm it. The generated firewall allows the UI port from LAN/loopback and rejects WAN ingress. Emergency bypass: `sudo gateway-kit disable --confirm`. Uninstall: `sudo ./packaging/uninstall.sh`.
+The UI listens on `0.0.0.0:7676` by default. On first installation, it generates and prints a one-time administrator username and temporary password; the password must be changed after the first login. After Gateway apply, the generated firewall allows the UI port from the configured LAN and WAN interfaces. The API uses an HttpOnly session cookie after username/password login. Manage credentials on the Account & Security page; reset a lost password locally with `sudo gateway-kit auth-reset-password`. The UI uses HTTP, so use an HTTPS reverse proxy or VPN for public administration. Configure the network and an authorized encrypted remote connection, review the plan, and confirm it. Emergency bypass: `sudo gateway-kit disable --confirm`. Uninstall: `sudo ./packaging/uninstall.sh`.
 
 ## Repository structure
 

@@ -187,7 +187,6 @@ EOF
 cat >"$WORKDIR/secrets.toml" <<EOF
 wireguard_private_key = "$GW_PRIV"
 wireguard_peer_public_key = "$VPS_PUB"
-ui_lan_token = ""
 EOF
 chmod 600 "$WORKDIR/secrets.toml"
 

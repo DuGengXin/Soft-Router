@@ -11,9 +11,12 @@ path = "src/main.rs"
 
 [dependencies]
 axum = { workspace = true }
+argon2 = "0.5"
 clap = { workspace = true }
+getrandom = "0.2"
 gateway-core = { workspace = true }
 gateway-model = { workspace = true }
+sha2 = "0.11"
 rust-embed = { version = "8.7", features = ["interpolate-folder-path"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

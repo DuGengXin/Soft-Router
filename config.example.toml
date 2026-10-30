@@ -48,8 +48,17 @@ china_direct = true
 extra_direct_cidrs = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
 policy_table_id = 51820
 
+[dns]
+# 境外域名解析必须穿过隧道，UDP 查询在丢包线路上会直接超时；改用 DoH 走 TCP
+# 可重传。接受 ip、ip:port、tls://host 或 https://host/path。
+# 境外 DoH 端点放在代理出口之后，因此不要配成直连可达的地址。
+overseas = "https://1.1.1.1/dns-query"
+# 以 IP 形式访问 DoH 且证书不含该 IP 时，在这里补 SNI。
+overseas_server_name = ""
+
+
 [ui]
-# LAN access is protected by secrets.toml ui_lan_token and the generated
-# firewall rejects WAN connections to this port.
+# Remote UI API uses the administrator password account in secrets.toml. The generated
+# firewall allows this port on the configured WAN and LAN interfaces.
 bind = "0.0.0.0"
 port = 7676

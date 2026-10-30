@@ -8,6 +8,10 @@ use crate::{
 };
 use gateway_model::{AppConfig, ApplyReason, ChangePlan, PlanStatus, Secrets};
 
+#[path = "apply/services.rs"]
+mod services;
+use services::{start_data_plane_units, start_forwarding_unit, stop_data_plane_units};
+
 const SYSCTL_DROPIN: &str = "/etc/sysctl.d/99-gateway-kit.conf";
 use std::fs;
 
@@ -44,7 +48,7 @@ impl<R: CommandRunner> Drop for ApplyGuard<'_, R> {
 pub fn apply_plan(
     paths: &Paths,
     config: &AppConfig,
-    _secrets: &Secrets,
+    secrets: &Secrets,
     plan: &ChangePlan,
     reason: ApplyReason,
     runner: &impl CommandRunner,
@@ -88,6 +92,7 @@ pub fn apply_plan(
         }
         let body = file.contents.clone();
         let sensitive = file.relative_path.ends_with("sing-box.json")
+            || file.relative_path.ends_with("xray.json")
             || (file.relative_path.ends_with(".conf") && file.contents.contains("PrivateKey"));
         fs::write(&dest, &body)?;
         #[cfg(unix)]
@@ -99,6 +104,16 @@ pub fn apply_plan(
         }
         #[cfg(not(unix))]
         let _ = sensitive;
+    }
+    if !plan
+        .files
+        .iter()
+        .any(|file| file.relative_path == "xray.json")
+    {
+        let stale_xray = paths.generated_dir.join("xray.json");
+        if stale_xray.exists() {
+            fs::remove_file(stale_xray)?;
+        }
     }
 
     assign_address(runner, &config.lan.interface, config.lan.address.as_deref())?;
@@ -152,19 +167,21 @@ pub fn apply_plan(
         apply_wireguard(runner, paths, config)?;
     }
     start_forwarding_unit(paths, runner);
-    start_data_plane_units(paths, config, runner);
+    start_data_plane_units(paths, config, secrets, runner);
     if paths.manages_host_units() {
         wait_for_tproxy(runner);
     }
 
     let geo_cache = paths.generated_dir.join("sing-box-cache.db");
     let singbox_config = paths.generated_dir.join("sing-box.json");
-    let health = crate::check_applied_with_artifacts(
+    let xray_config = paths.generated_dir.join("xray.json");
+    let health = crate::check_applied_with_xray_artifact(
         config,
         runner,
         paths.manages_host_units(),
         Some(&singbox_config),
         Some(&geo_cache),
+        Some(&xray_config),
     );
     if health.status != gateway_model::HealthStatus::Healthy {
         return Err(CoreError::Apply(format!(
@@ -304,44 +321,6 @@ pub fn rollback(
         generation_id: id,
         message: "restored last successful generation".into(),
     })
-}
-
-fn uses_product_systemd(paths: &Paths) -> bool {
-    paths.manages_host_units()
-}
-
-fn start_data_plane_units(paths: &Paths, config: &AppConfig, runner: &impl CommandRunner) {
-    if uses_product_systemd(paths) {
-        let _ = runner.run("systemctl", &["enable", "gateway-kit-singbox"]);
-        if config.dhcp.enabled {
-            let _ = runner.run("systemctl", &["enable", "gateway-kit-dnsmasq"]);
-        } else {
-            let _ = runner.run("systemctl", &["disable", "--now", "gateway-kit-dnsmasq"]);
-        }
-    }
-    let _ = runner.run("systemctl", &["restart", "gateway-kit-singbox"]);
-    if config.dhcp.enabled {
-        let _ = runner.run("systemctl", &["restart", "gateway-kit-dnsmasq"]);
-    }
-}
-
-fn start_forwarding_unit(paths: &Paths, runner: &impl CommandRunner) {
-    if !uses_product_systemd(paths) {
-        return;
-    }
-    let _ = runner.run("systemctl", &["enable", "gateway-kit-forwarding"]);
-    let _ = runner.run("systemctl", &["restart", "gateway-kit-forwarding"]);
-}
-
-fn stop_data_plane_units(paths: &Paths, runner: &impl CommandRunner) {
-    if uses_product_systemd(paths) {
-        let _ = runner.run("systemctl", &["disable", "--now", "gateway-kit-forwarding"]);
-        let _ = runner.run("systemctl", &["disable", "--now", "gateway-kit-singbox"]);
-        let _ = runner.run("systemctl", &["disable", "--now", "gateway-kit-dnsmasq"]);
-        return;
-    }
-    let _ = runner.run("systemctl", &["stop", "gateway-kit-singbox"]);
-    let _ = runner.run("systemctl", &["stop", "gateway-kit-dnsmasq"]);
 }
 
 fn wait_for_tproxy(runner: &impl CommandRunner) {

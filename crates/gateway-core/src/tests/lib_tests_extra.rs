@@ -17,7 +17,6 @@ fn gateway_plan_renders_split_routing() {
     let secrets = gateway_model::Secrets {
         wireguard_private_key: Some("PRIV".into()),
         wireguard_peer_public_key: Some("PUB".into()),
-        ui_lan_token: Some("token".into()),
         ..Default::default()
     };
     let plan = build_plan(&cfg, &secrets, &PreflightReport::default()).unwrap();
@@ -44,7 +43,7 @@ fn gateway_plan_renders_split_routing() {
     );
     assert!(
         nft.contents
-            .contains("iifname \"eth0\" tcp dport 7676 drop")
+            .contains("iifname \"eth0\" tcp dport 7676 accept")
     );
     assert!(
         nft.contents
@@ -118,7 +117,6 @@ fn china_direct_off_does_not_pull_geoip() {
     let secrets = gateway_model::Secrets {
         wireguard_private_key: Some("PRIV".into()),
         wireguard_peer_public_key: Some("PUB".into()),
-        ui_lan_token: Some("token".into()),
         ..Default::default()
     };
     let plan = build_plan(&cfg, &secrets, &PreflightReport::default()).unwrap();
@@ -146,7 +144,6 @@ fn blockers_stop_apply() {
     let secrets = gateway_model::Secrets {
         wireguard_private_key: Some("PRIV".into()),
         wireguard_peer_public_key: Some("PUB".into()),
-        ui_lan_token: Some("token".into()),
         ..Default::default()
     };
     let mut report = PreflightReport::default();
@@ -193,7 +190,6 @@ fn confirm_apply_writes_and_can_disable() {
     let secrets = gateway_model::Secrets {
         wireguard_private_key: Some("PRIV".into()),
         wireguard_peer_public_key: Some("PUB".into()),
-        ui_lan_token: Some("token".into()),
         ..Default::default()
     };
     let plan = build_plan(&cfg, &secrets, &PreflightReport::default()).unwrap();
@@ -264,7 +260,6 @@ fn apply_replaces_iface_addrs_not_main_default() {
     let secrets = gateway_model::Secrets {
         wireguard_private_key: Some("PRIV".into()),
         wireguard_peer_public_key: Some("PUB".into()),
-        ui_lan_token: Some("token".into()),
         ..Default::default()
     };
     let plan = build_plan(&cfg, &secrets, &PreflightReport::default()).unwrap();
@@ -326,7 +321,6 @@ fn apply_installs_non_default_wg_routes_not_main_default() {
     let secrets = gateway_model::Secrets {
         wireguard_private_key: Some("PRIV".into()),
         wireguard_peer_public_key: Some("PUB".into()),
-        ui_lan_token: Some("token".into()),
         ..Default::default()
     };
     let plan = build_plan(&cfg, &secrets, &PreflightReport::default()).unwrap();
@@ -380,7 +374,6 @@ fn boot_restore_replays_last_successful_generation() {
     let secrets = gateway_model::Secrets {
         wireguard_private_key: Some("PRIV".into()),
         wireguard_peer_public_key: Some("PUB".into()),
-        ui_lan_token: Some("token".into()),
         ..Default::default()
     };
     crate::save_config(&paths.config, &cfg).unwrap();
@@ -468,7 +461,7 @@ fn install_script_is_observe_only() {
     let wait = include_str!("../../../../packaging/gateway-kit-wait-network.sh");
     assert!(sh.contains("observe"));
     assert!(sh.contains("listening on 0.0.0.0:7676"));
-    assert!(sh.contains("ui_lan_token"));
+    assert!(sh.contains("auth-bootstrap"));
     assert!(sh.contains("ip -4 -o addr show"));
     assert!(sh.contains("gateway-kit-wait-network.sh"));
     assert!(unit.contains("EnvironmentFile=-/etc/gateway-kit/generated/forwarding.env"));

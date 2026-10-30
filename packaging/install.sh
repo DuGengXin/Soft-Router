@@ -45,6 +45,9 @@ if ! command -v sing-box >/dev/null 2>&1; then
   echo "optional (needed only after confirmed apply): sing-box is not in Debian by default." >&2
   echo "install the official binary yourself; this script does not add third-party apt sources." >&2
 fi
+if ! command -v xray >/dev/null 2>&1; then
+  echo "optional (needed only for VLESS apply): install the official Xray-core binary yourself." >&2
+fi
 
 if [[ -z "$BIN" ]]; then
   echo "usage: sudo $0 --bin ./target/release/gateway-kit" >&2
@@ -60,6 +63,7 @@ install -m 0755 "$BIN" "$PREFIX/bin/gateway-kit"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 install -m 0644 "$HERE/gateway-kit.service" /etc/systemd/system/gateway-kit.service
 install -m 0644 "$HERE/gateway-kit-singbox.service" /etc/systemd/system/gateway-kit-singbox.service
+install -m 0644 "$HERE/gateway-kit-xray.service" /etc/systemd/system/gateway-kit-xray.service
 install -m 0644 "$HERE/gateway-kit-dnsmasq.service" /etc/systemd/system/gateway-kit-dnsmasq.service
 install -m 0644 "$HERE/gateway-kit-forwarding.service" /etc/systemd/system/gateway-kit-forwarding.service
 install -m 0755 "$HERE/gateway-kit-forwarding.sh" /usr/local/libexec/gateway-kit-forwarding.sh
@@ -72,25 +76,25 @@ if [[ ! -f /etc/gateway-kit/config.toml ]]; then
 fi
 if [[ ! -f /etc/gateway-kit/secrets.toml ]]; then
   umask 077
-  UI_TOKEN="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
   cat >/etc/gateway-kit/secrets.toml <<'EOF'
 wireguard_private_key = ""
 wireguard_peer_public_key = ""
 wireguard_preshared_key = ""
-ui_lan_token = "__UI_TOKEN__"
 proxy_uri = ""
 EOF
-  sed -i "s/__UI_TOKEN__/$UI_TOKEN/" /etc/gateway-kit/secrets.toml
   chmod 600 /etc/gateway-kit/secrets.toml
-  echo "generated LAN UI token: $UI_TOKEN"
 fi
+
+"$PREFIX/bin/gateway-kit" auth-bootstrap
 
 systemctl daemon-reload
 systemctl enable --now gateway-kit.service
 systemctl disable gateway-kit-singbox.service >/dev/null 2>&1 || true
+systemctl disable gateway-kit-xray.service >/dev/null 2>&1 || true
 systemctl disable gateway-kit-dnsmasq.service >/dev/null 2>&1 || true
 systemctl disable gateway-kit-forwarding.service >/dev/null 2>&1 || true
-echo "installed. UI listening on 0.0.0.0:7676; open a listed LAN address (use the generated token)"
-echo "network was NOT changed (observe mode). sing-box/dnsmasq units are installed but not started."
+echo "installed. UI listening on 0.0.0.0:7676; sign in with the one-time administrator credentials above"
+echo "lost the password? run: sudo $PREFIX/bin/gateway-kit auth-reset-password"
+echo "network was NOT changed (observe mode). sing-box/xray/dnsmasq units are installed but not started."
 echo "detected IPv4 addresses (install did not assign them):"
 ip -4 -o addr show | awk '{print "  " $2, $4}' || true

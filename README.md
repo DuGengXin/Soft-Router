@@ -20,7 +20,7 @@ Before using this project, read the following carefully:
 
 [English version](README.en.md)
 
-Linux 软路由控制面，使用 Rust 构建为单一 `gateway-kit` 二进制。它负责配置、预检、计划、应用、健康检查和恢复；数据面由 Linux `nftables`、WireGuard、`sing-box` 与 `dnsmasq` 承担。
+Linux 软路由控制面，使用 Rust 构建为单一 `gateway-kit` 二进制。它负责配置、预检、计划、应用、健康检查和恢复；数据面由 Linux `nftables`、WireGuard、`sing-box`、按需运行的 Xray-core 与 `dnsmasq` 承担。
 
 ## 项目业务介绍
 
@@ -66,9 +66,9 @@ cargo build --release -p gateway-app
 sudo ./packaging/install.sh --bin ./target/release/gateway-kit
 ```
 
-安装脚本默认只安装文件和 systemd 单元，不改变主路由。默认 UI 监听 `0.0.0.0:7676`，安装时生成 LAN 访问令牌并打印一次；使用 LAN 地址访问并在「访问令牌」页录入令牌。在向导中填写 WAN/LAN 与已授权的加密隧道或远程出口，预览计划并确认应用。生成的防火墙只允许 LAN/本机访问 UI 端口，拒绝 WAN 入站。紧急旁路：`sudo gateway-kit disable --confirm`；卸载：`sudo ./packaging/uninstall.sh`。
+安装脚本默认只安装文件和 systemd 单元，不改变主路由。默认 UI 监听 `0.0.0.0:7676`，首次安装会生成并显示一次性管理员用户名和临时密码；首次登录后必须设置新密码。配置 Gateway 后，UI 端口允许从配置的 LAN/WAN 网卡访问，API 由用户名/密码登录后的 HttpOnly 会话保护。后续可在「账号与安全」页修改账户；遗失密码时运行 `sudo gateway-kit auth-reset-password`。UI 使用 HTTP，公网管理请经 HTTPS 反向代理或 VPN 访问。在向导中填写 WAN/LAN 与已授权的加密隧道或远程出口，预览计划并确认应用。紧急旁路：`sudo gateway-kit disable --confirm`；卸载：`sudo ./packaging/uninstall.sh`。
 
-示例配置：[`config.example.toml`](config.example.toml)；敏感配置模板：[`secrets.example.toml`](secrets.example.toml)。不要把真实连接 URI、私钥、UI token 或服务器地址写入示例文件、issue、日志或提交记录。
+示例配置：[`config.example.toml`](config.example.toml)；敏感配置模板：[`secrets.example.toml`](secrets.example.toml)。不要把真实连接 URI、私钥、管理员密码或服务器地址写入示例文件、issue、日志或提交记录。
 
 ## 仓库结构
 

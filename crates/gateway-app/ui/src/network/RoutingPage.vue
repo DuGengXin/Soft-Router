@@ -3,11 +3,11 @@
     <template #header>分流</template>
     <el-form v-if="form" :model="form" label-width="160px">
       <el-form-item label="运行模式">
-        <el-select v-model="form.mode" style="max-width: 320px" @change="onMode">
+        <el-select v-model="form.mode" style="max-width: 320px">
           <el-option label="观察（不改网络）" value="observe" />
           <el-option label="网关（需确认应用）" value="gateway" />
         </el-select>
-        <div class="hint">网关模式保存后须到「计划与变更」确认应用。</div>
+        <div class="hint">网关模式保存后须到「计划与变更」确认应用；出口在「隧道」页选择，WireGuard 与 VLESS 二选一。</div>
       </el-form-item>
       <el-form-item label="国内直连">
         <el-checkbox v-model="form.routing.china_direct">国内走 WAN，境外走隧道</el-checkbox>
@@ -47,10 +47,6 @@ const wanDirect = computed(() => {
   const net = n & mask;
   return `${(net >>> 24) & 255}.${(net >>> 16) & 255}.${(net >>> 8) & 255}.${net & 255}/${p}`;
 });
-
-function onMode(mode: string) {
-  if (form.value && mode === "gateway") form.value.wireguard.enabled = true;
-}
 
 onMounted(async () => {
   try {

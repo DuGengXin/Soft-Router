@@ -3,7 +3,7 @@
 use crate::CoreError;
 use crate::render::{
     render_dnsmasq, render_forwarding_env, render_nftables, render_singbox_with_secrets,
-    render_sysctl, render_wg_quick,
+    render_sysctl, render_wg_quick, render_xray_with_secrets,
 };
 use gateway_model::{
     ActionKind, AppConfig, ChangePlan, ConflictPolicy, OperatingMode, PlanAction, PlanStatus,
@@ -59,6 +59,16 @@ pub fn build_plan(
             contents: render_forwarding_env(config),
         },
     ];
+    if secrets
+        .proxy_uri
+        .as_deref()
+        .is_some_and(|uri| !uri.trim().is_empty())
+    {
+        files.push(RenderedFile {
+            relative_path: "xray.json".into(),
+            contents: render_xray_with_secrets(config, secrets)?,
+        });
+    }
     if config.wireguard.enabled {
         files.push(RenderedFile {
             relative_path: format!("{}.conf", config.wireguard.interface),
@@ -82,7 +92,7 @@ pub fn build_plan(
         PlanAction {
             id: "proxy-uri".into(),
             kind: ActionKind::Systemctl,
-            summary: "start sing-box with the VLESS proxy_uri outbound".into(),
+            summary: "start Xray VLESS client and loopback SOCKS bridge".into(),
         }
     };
     let transport = if config.wireguard.enabled {
@@ -130,7 +140,7 @@ pub fn build_plan(
             id: "sing-box".into(),
             kind: ActionKind::Systemctl,
             summary: format!(
-                "start sing-box with generated config (china direct / else {transport})"
+                "start sing-box TProxy with generated config (china direct / else {transport})"
             ),
         },
     ];

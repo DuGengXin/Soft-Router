@@ -69,7 +69,7 @@ VPS 不在本仓库管理范围内。Rust 只消费用户提供的出站凭证�
 
 ```text
 Web UI / CLI
-    → Unix socket 或 本机 HTTP（仅 LAN/loopback）
+    → Unix socket 或本机 HTTP（loopback/LAN/WAN 网卡；Web API 使用管理员会话）
     → gateway-kit agent
     → gateway-core（plan/apply）
     → 写出 wg*.conf / nft / sing-box.json
@@ -98,7 +98,7 @@ sudo ./packaging/install.sh --bin ./gateway-kit
 3. 创建 `/etc/gateway-kit`、`/var/lib/gateway-kit`、`/var/log/gateway-kit`、`/var/backups/gateway-kit`。
 4. 若无配置，写入安全默认：`proxy.enabled=false`，不启用转发。
 5. 安装并 `enable --now gateway-kit.service`。
-6. 打印 `http://0.0.0.0:7676`、一次性生成的 LAN UI token 以及检测到的 LAN 地址（若已有）。
+6. 打印 `http://0.0.0.0:7676`、一次性管理员用户名和临时密码，以及检测到的 LAN 地址（若已有）；首次登录强制改密。
 7. **不**在安装时 apply 路由/NAT。
 
 ### 5.2 systemd
@@ -132,7 +132,7 @@ sudo ./packaging/install.sh --bin ./gateway-kit
 5. 应用/回滚/旁路
 6. 日志与最近事件（只读）
 
-认证：默认监听 LAN，安装生成 token；loopback/LAN 请求均受 input 规则保护，监听 LAN 时必须 token。WAN 不得默认放行 UI 端口。
+认证：默认监听 `0.0.0.0`；管理员以用户名/密码登录并获得短期 HttpOnly 会话，Gateway apply 后配置的 WAN/LAN 网卡均允许访问 UI 端口。公网管理应使用 HTTPS 反向代理或 VPN。
 
 ## 6. 分阶段交付
 
@@ -264,7 +264,7 @@ sudo ./packaging/install.sh --bin ./gateway-kit
 | 一装就改默认路由导致 SSH 断 | 安装默认 observe；apply 前检查管理源 IP |
 | sing-box/3x-ui 双头管理 | VPS 只跑 3x-ui；Linux 只跑 sing-box 客户端 |
 | 公网网段当内网 | 校验警告 + 文档 |
-| Web UI 暴露到 WAN | 默认 bind 0.0.0.0；`gateway_kit` input 链拒绝 WAN UI 端口 |
+| Web UI 暴露到 WAN | 默认 bind 0.0.0.0；仅配置的 WAN/LAN 网卡允许 UI 端口，API 使用用户名/密码登录会话 |
 | 范围膨胀 | Phase 5 之前不做订阅转换、多 WAN、广告过滤 |
 
 ## 11. 建议立即开工顺序

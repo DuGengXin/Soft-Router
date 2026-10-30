@@ -16,6 +16,11 @@ config.toml
 state.db
 doctor.json
 
+# Local scratch and tool caches.
+.dsh-tmp/
+__pycache__/
+*.pyc
+
 # Local credentials and machine-specific exports.
 *.pem
 *.key

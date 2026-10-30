@@ -1,15 +1,11 @@
 import { ElMessage, ElMessageBox } from "element-plus";
 
-const token = () => localStorage.getItem("gk_token") || "";
-
 export async function api(path: string, opts: RequestInit = {}) {
   const headers = new Headers(opts.headers);
   if (!headers.has("content-type")) {
     headers.set("content-type", "application/json");
   }
-  const t = token();
-  if (t) headers.set("x-gateway-token", t);
-  const res = await fetch(path, { ...opts, headers });
+  const res = await fetch(path, { ...opts, headers, credentials: "same-origin" });
   const text = await res.text();
   let data: Record<string, unknown> | unknown[] | { raw: string };
   try {
@@ -20,7 +16,11 @@ export async function api(path: string, opts: RequestInit = {}) {
   if (!res.ok) {
     const rec = data as { raw?: string; message?: string };
     const msg = rec.raw || rec.message || text || String(res.status);
-    ElMessage.error(msg);
+    const authEndpoint = path.startsWith("/api/v1/auth/");
+    if (res.status === 401 && !authEndpoint) {
+      window.dispatchEvent(new CustomEvent("gateway-auth-expired"));
+    }
+    if (!authEndpoint) ElMessage.error(msg);
     throw new Error(msg);
   }
   return data;

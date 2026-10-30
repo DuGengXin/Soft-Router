@@ -1,6 +1,6 @@
 [Unit]
 Description=Gateway-Kit sing-box (started only after confirmed apply)
-After=network-online.target gateway-kit.service gateway-kit-forwarding.service
+After=network-online.target gateway-kit.service gateway-kit-xray.service gateway-kit-forwarding.service
 Requires=gateway-kit-forwarding.service
 ConditionPathExists=/etc/gateway-kit/generated/sing-box.json
 StartLimitIntervalSec=120

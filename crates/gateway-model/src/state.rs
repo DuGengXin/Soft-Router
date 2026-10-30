@@ -157,10 +157,11 @@ impl ChangePlan {
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            if file.relative_path.ends_with("sing-box.json")
+            let xray_config = file.relative_path.ends_with("xray.json");
+            if (file.relative_path.ends_with("sing-box.json") || xray_config)
                 && let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&file.contents)
             {
-                Self::redact_json_secrets(&mut value);
+                Self::redact_json_secrets(&mut value, xray_config);
                 file.contents = serde_json::to_string_pretty(&value)
                     .unwrap_or_else(|_| "{\"redacted\":true}".into());
             }
@@ -168,20 +169,22 @@ impl ChangePlan {
         plan
     }
 
-    fn redact_json_secrets(value: &mut serde_json::Value) {
+    fn redact_json_secrets(value: &mut serde_json::Value, xray_config: bool) {
         match value {
             serde_json::Value::Object(object) => {
                 for (key, value) in object.iter_mut() {
-                    if matches!(key.as_str(), "uuid" | "public_key" | "private_key") {
+                    if matches!(key.as_str(), "uuid" | "public_key" | "private_key")
+                        || (xray_config && matches!(key.as_str(), "id" | "password" | "publicKey"))
+                    {
                         *value = serde_json::Value::String("[redacted]".into());
                     } else {
-                        Self::redact_json_secrets(value);
+                        Self::redact_json_secrets(value, xray_config);
                     }
                 }
             }
             serde_json::Value::Array(values) => {
                 for value in values {
-                    Self::redact_json_secrets(value);
+                    Self::redact_json_secrets(value, xray_config);
                 }
             }
             _ => {}

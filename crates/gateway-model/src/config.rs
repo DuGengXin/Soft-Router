@@ -163,6 +163,34 @@ impl Default for RoutingConfig {
     }
 }
 
+/// Resolver policy for the rendered sing-box DNS block.
+///
+/// Domestic names keep resolving through the configured interface DNS over
+/// the direct outbound. Overseas lookups cross the tunnel, so DoH/DoT can
+/// recover from packet loss with TCP retransmission.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DnsConfig {
+    /// Accepts `ip`, `ip:port`, `tls://host[:port]` or `https://host[:port]/path`.
+    #[serde(default = "default_overseas_dns")]
+    pub overseas: String,
+    /// Optional TLS SNI override for IP-based TLS endpoints.
+    #[serde(default)]
+    pub overseas_server_name: String,
+}
+
+pub fn default_overseas_dns() -> String {
+    "https://1.1.1.1/dns-query".into()
+}
+
+impl Default for DnsConfig {
+    fn default() -> Self {
+        Self {
+            overseas: default_overseas_dns(),
+            overseas_server_name: String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UiConfig {
     pub bind: String,
@@ -183,8 +211,11 @@ pub struct Secrets {
     pub wireguard_private_key: Option<String>,
     pub wireguard_peer_public_key: Option<String>,
     pub wireguard_preshared_key: Option<String>,
-    pub ui_lan_token: Option<String>,
     pub proxy_uri: Option<String>,
+    pub admin_username: Option<String>,
+    pub admin_password_hash: Option<String>,
+    #[serde(default)]
+    pub admin_password_change_required: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -192,7 +223,6 @@ pub struct SecretsPatch {
     pub wireguard_private_key: Option<String>,
     pub wireguard_peer_public_key: Option<String>,
     pub wireguard_preshared_key: Option<String>,
-    pub ui_lan_token: Option<String>,
     pub proxy_uri: Option<String>,
 }
 
@@ -201,8 +231,8 @@ pub struct SecretsStatus {
     pub wireguard_private_key_present: bool,
     pub wireguard_peer_public_key_present: bool,
     pub wireguard_preshared_key_present: bool,
-    pub ui_lan_token_present: bool,
     pub proxy_uri_present: bool,
+    pub admin_account_configured: bool,
 }
 
 impl Secrets {
@@ -211,8 +241,12 @@ impl Secrets {
             wireguard_private_key_present: present_secret(&self.wireguard_private_key),
             wireguard_peer_public_key_present: present_secret(&self.wireguard_peer_public_key),
             wireguard_preshared_key_present: present_secret(&self.wireguard_preshared_key),
-            ui_lan_token_present: present_secret(&self.ui_lan_token),
             proxy_uri_present: present_secret(&self.proxy_uri),
+            admin_account_configured: self
+                .admin_username
+                .as_deref()
+                .is_some_and(|s| !s.is_empty())
+                && present_secret(&self.admin_password_hash),
         }
     }
 
@@ -229,7 +263,6 @@ impl Secrets {
             &mut self.wireguard_preshared_key,
             &patch.wireguard_preshared_key,
         );
-        overlay(&mut self.ui_lan_token, &patch.ui_lan_token);
         overlay_trimmed(&mut self.proxy_uri, &patch.proxy_uri);
     }
 }

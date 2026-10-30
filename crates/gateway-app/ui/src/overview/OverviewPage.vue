@@ -66,7 +66,7 @@ type Status = {
   tunnel_uplink?: string;
   wan_direct_cidr?: string;
   conflicts?: { severity: string; title: string; detail: string }[];
-  wireguard?: { enabled?: boolean; interface?: string };
+  tunnel?: { transport?: string; wireguard_interface?: string };
   routing?: { china_direct?: boolean };
   dataplane?: { status?: string; message?: string; notes?: string[] };
 };
@@ -125,6 +125,18 @@ function recoveryLabel(dp?: Status["dataplane"]) {
   if (dp?.status === "healthy") return "运行中";
   if (dp?.status === "unhealthy" || dp?.status === "degraded") return "自愈中";
   return "已启用";
+}
+function transportLabel() {
+  const t = status.tunnel?.transport;
+  if (t === "wireguard") return "WireGuard";
+  if (t === "vless") return "VLESS";
+  return "未配置";
+}
+function tunnelDetail() {
+  const t = status.tunnel?.transport;
+  if (t === "wireguard") return `WireGuard handshake · ${status.tunnel?.wireguard_interface || "wg0"}`;
+  if (t === "vless") return "VLESS · Xray 本地 SOCKS 桥接";
+  return "未启用出口";
 }
 function linkLabel(s?: string) {
   if (s === "up") return "通";
@@ -192,7 +204,7 @@ const cards = computed(() => [
   {
     title: "隧道链路",
     value: linkLabel(status.tunnel_uplink),
-    sub: "WireGuard handshake",
+    sub: tunnelDetail(),
   },
   {
     title: "运行模式",
@@ -205,9 +217,9 @@ const cards = computed(() => [
     sub: status.blockers ? "先处理冲突再应用" : "可以预览计划",
   },
   {
-    title: "WireGuard",
-    value: status.wireguard?.enabled ? "开" : "关",
-    sub: status.wireguard?.interface || "wg0",
+    title: "出口方式",
+    value: transportLabel(),
+    sub: tunnelDetail(),
   },
   {
     title: "国内直连",

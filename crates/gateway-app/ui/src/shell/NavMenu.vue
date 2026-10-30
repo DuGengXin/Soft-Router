@@ -23,7 +23,7 @@
         <el-menu-item index="forwards">端口映射</el-menu-item>
       </el-sub-menu>
       <el-menu-item index="plan">计划与变更</el-menu-item>
-      <el-menu-item index="access">访问令牌</el-menu-item>
+      <el-menu-item index="account">账号与安全</el-menu-item>
     </el-menu>
     <div class="foot">Element Plus · 与 1Panel 同系</div>
   </div>
