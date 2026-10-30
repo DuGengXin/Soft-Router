@@ -69,6 +69,7 @@ type Status = {
   tunnel?: { transport?: string; wireguard_interface?: string };
   routing?: { china_direct?: boolean };
   dataplane?: { status?: string; message?: string; notes?: string[] };
+  egress?: { status?: string; detail?: string; checked_at?: number };
 };
 
 type Host = {
@@ -137,6 +138,18 @@ function tunnelDetail() {
   if (t === "wireguard") return `WireGuard handshake · ${status.tunnel?.wireguard_interface || "wg0"}`;
   if (t === "vless") return "VLESS · Xray 本地 SOCKS 桥接";
   return "未启用出口";
+}
+function egressLabel() {
+  const s = status.egress?.status;
+  if (s === "reachable") return "通";
+  if (s === "unreachable") return "不通";
+  return "未知";
+}
+function egressDetail() {
+  const d = status.egress?.detail;
+  const at = status.egress?.checked_at;
+  if (!d) return "尚未探测";
+  return at ? `${d} · ${fmtTime(at)}` : d;
 }
 function linkLabel(s?: string) {
   if (s === "up") return "通";
@@ -220,6 +233,11 @@ const cards = computed(() => [
     title: "出口方式",
     value: transportLabel(),
     sub: tunnelDetail(),
+  },
+  {
+    title: "出口探测",
+    value: egressLabel(),
+    sub: egressDetail(),
   },
   {
     title: "国内直连",

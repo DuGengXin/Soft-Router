@@ -20,14 +20,19 @@ use gateway_model::{
 use rust_embed::Embed;
 use serde::Deserialize;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 struct AppState {
     paths: Paths,
     service: AppService,
     auth: Arc<AuthState>,
+    egress: EgressCache,
 }
+
+/// Last overseas-egress probe, refreshed by the background health watcher so
+/// that polling `/api/v1/status` never triggers a real network request.
+pub(crate) type EgressCache = Arc<Mutex<Option<gateway_core::EgressReport>>>;
 
 #[derive(Debug, Deserialize)]
 struct ConfirmBody {
@@ -43,6 +48,7 @@ struct WgPaste {
 pub async fn serve(
     paths: Paths,
     listen_override: Option<String>,
+    egress: EgressCache,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let config = default_or_load_config(&paths.config)?;
     let bind = listen_override.unwrap_or_else(|| format!("{}:{}", config.ui.bind, config.ui.port));
@@ -50,6 +56,7 @@ pub async fn serve(
         service: AppService::new(paths.clone()),
         auth: Arc::new(AuthState::new(paths.secrets.clone())),
         paths,
+        egress,
     };
     let app = Router::new()
         .route("/", get(index))
@@ -220,6 +227,7 @@ async fn status(State(state): State<AppState>) -> impl IntoResponse {
                 "conflicts": report.conflicts,
                 "interfaces": report.interfaces,
                 "dataplane": dataplane_json(&state.paths, &config),
+                "egress": egress_json(&state.egress),
             }))
             .into_response()
         }
@@ -334,6 +342,18 @@ fn mutate(service: &AppService, confirm: bool, kind: Mutate) -> Response {
         }))
         .into_response(),
         Err(error) => (StatusCode::CONFLICT, error.to_string()).into_response(),
+    }
+}
+
+fn egress_json(cache: &EgressCache) -> serde_json::Value {
+    let guard = cache.lock().ok();
+    match guard.as_deref() {
+        Some(Some(report)) => serde_json::to_value(report).unwrap_or(serde_json::Value::Null),
+        _ => serde_json::json!({
+            "status": "unknown",
+            "detail": "not probed yet",
+            "checked_at": 0
+        }),
     }
 }
 

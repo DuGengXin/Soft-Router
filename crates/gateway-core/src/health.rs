@@ -3,8 +3,113 @@
 use crate::command::CommandRunner;
 use gateway_model::{
     AppConfig, DNS_PROXY_PORT, HealthSnapshot, HealthStatus, TPROXY_PORT, TunnelTransport,
+    XRAY_SOCKS_PORT,
 };
+use serde::{Deserialize, Serialize};
 use std::path::Path;
+
+/// Neutral endpoint that returns 204 and is blocked without a working overseas path.
+pub const EGRESS_PROBE_URL: &str = "https://www.gstatic.com/generate_204";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EgressStatus {
+    Unknown,
+    Reachable,
+    Unreachable,
+}
+
+/// Result of a real request through the configured overseas transport.
+///
+/// `check_applied_with_xray_artifact` only proves processes and listeners exist;
+/// this proves the tunnel actually carries traffic.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EgressReport {
+    pub status: EgressStatus,
+    pub detail: String,
+    pub checked_at: i64,
+}
+
+impl EgressReport {
+    fn unknown(detail: impl Into<String>) -> Self {
+        Self {
+            status: EgressStatus::Unknown,
+            detail: detail.into(),
+            checked_at: now_secs(),
+        }
+    }
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Send one short request through the active transport and report what came back.
+pub fn probe_egress(
+    runner: &impl CommandRunner,
+    transport: TunnelTransport,
+    wireguard_interface: &str,
+) -> EgressReport {
+    let label = match transport {
+        TunnelTransport::Vless => format!("VLESS via Xray SOCKS :{XRAY_SOCKS_PORT}"),
+        TunnelTransport::Wireguard if !wireguard_interface.is_empty() => {
+            format!("WireGuard {wireguard_interface}")
+        }
+        _ => return EgressReport::unknown("no overseas transport configured"),
+    };
+    let mut args: Vec<String> = ["-sS", "-m", "8", "-o", "/dev/null", "-w", "%{http_code}"]
+        .iter()
+        .map(|arg| (*arg).to_string())
+        .collect();
+    match transport {
+        TunnelTransport::Vless => {
+            args.push("-x".into());
+            args.push(format!("socks5h://127.0.0.1:{XRAY_SOCKS_PORT}"));
+        }
+        _ => {
+            args.push("--interface".into());
+            args.push(wireguard_interface.to_string());
+        }
+    }
+    args.push(EGRESS_PROBE_URL.to_string());
+    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+    let report = match runner.run("curl", &argv) {
+        Ok(out) if out.status == Some(0) && out.stdout.trim() == "204" => EgressReport {
+            status: EgressStatus::Reachable,
+            detail: format!("{label}: HTTP 204"),
+            checked_at: now_secs(),
+        },
+        Ok(out) => {
+            let code = out.stdout.trim();
+            let detail = if code.is_empty() || code == "000" {
+                first_line(&out.stderr).unwrap_or_else(|| "no response".into())
+            } else {
+                format!("HTTP {code}")
+            };
+            EgressReport {
+                status: EgressStatus::Unreachable,
+                detail: format!("{label}: {detail}"),
+                checked_at: now_secs(),
+            }
+        }
+        Err(error) => EgressReport {
+            status: EgressStatus::Unreachable,
+            detail: format!("{label}: {error}"),
+            checked_at: now_secs(),
+        },
+    };
+    report
+}
+
+fn first_line(text: &str) -> Option<String> {
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+}
 
 pub fn check_applied(
     config: &AppConfig,
@@ -277,9 +382,33 @@ fn handshake_never(stdout: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_applied, check_applied_with_cache};
+    use super::{EgressStatus, check_applied, check_applied_with_cache, probe_egress};
     use crate::command::ScriptedRunner;
-    use gateway_model::{AppConfig, HealthStatus};
+    use gateway_model::{AppConfig, HealthStatus, TunnelTransport};
+
+    #[test]
+    fn egress_probe_reports_reachable_on_204() {
+        let runner = ScriptedRunner::default();
+        runner.push_ok("curl", "204");
+        let report = probe_egress(&runner, TunnelTransport::Vless, "wg0");
+        assert_eq!(report.status, EgressStatus::Reachable);
+        assert!(report.detail.contains("VLESS"));
+    }
+
+    #[test]
+    fn egress_probe_reports_unreachable_without_status() {
+        let runner = ScriptedRunner::default();
+        runner.push_ok("curl", "000");
+        let report = probe_egress(&runner, TunnelTransport::Vless, "wg0");
+        assert_eq!(report.status, EgressStatus::Unreachable);
+    }
+
+    #[test]
+    fn egress_probe_is_unknown_without_a_transport() {
+        let runner = ScriptedRunner::default();
+        let report = probe_egress(&runner, TunnelTransport::None, "wg0");
+        assert_eq!(report.status, EgressStatus::Unknown);
+    }
 
     #[test]
     fn nonempty_ip_rule_must_mention_policy_table() {

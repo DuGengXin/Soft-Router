@@ -8,11 +8,12 @@ use clap::{Parser, Subcommand};
 use gateway_core::{
     Paths, SystemCommandRunner, check_applied_with_xray_artifact, default_or_load_config, disable,
     discover_host, init_database, latest_successful_generation, load_secrets, persist_preflight,
-    record_event, restore_on_boot, save_config,
+    probe_egress, record_event, restore_on_boot, save_config,
 };
 use gateway_model::{AppConfig, OperatingMode};
 use service::AppService;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -202,15 +203,17 @@ async fn agent_main(
         );
         return Ok(());
     }
+    let egress: http::EgressCache = Default::default();
     let health_paths = paths.clone();
+    let health_egress = Arc::clone(&egress);
     tokio::spawn(async move {
-        health_watch(health_paths).await;
+        health_watch(health_paths, health_egress).await;
     });
-    http::serve(paths, listen).await?;
+    http::serve(paths, listen, egress).await?;
     Ok(())
 }
 
-async fn health_watch(paths: Paths) {
+async fn health_watch(paths: Paths, egress: http::EgressCache) {
     let mut strikes = 0u8;
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
     interval.tick().await;
@@ -219,6 +222,18 @@ async fn health_watch(paths: Paths) {
         let Ok(config) = default_or_load_config(&paths.config) else {
             continue;
         };
+        // Prove the tunnel carries traffic, not merely that its processes are up.
+        let secrets = load_secrets(&paths.secrets).unwrap_or_default();
+        let transport = config.tunnel_transport(&secrets);
+        let interface = config.wireguard.interface.clone();
+        if let Ok(report) = tokio::task::spawn_blocking(move || {
+            probe_egress(&SystemCommandRunner, transport, &interface)
+        })
+        .await
+            && let Ok(mut slot) = egress.lock()
+        {
+            *slot = Some(report);
+        }
         if config.mode != OperatingMode::Gateway {
             strikes = 0;
             continue;
