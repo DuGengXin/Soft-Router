@@ -8,8 +8,16 @@ use gateway_model::{
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// Neutral endpoint that returns 204 and is blocked without a working overseas path.
-pub const EGRESS_PROBE_URL: &str = "https://www.gstatic.com/generate_204";
+/// Neutral endpoint that returns 204 and is unreachable without a working overseas path.
+///
+/// Deliberately not `gstatic.com`: that host is classified as mainland by
+/// `geosite-cn`, so sing-box resolves it to a domestic CDN and it proves nothing
+/// about the tunnel.
+pub const EGRESS_PROBE_URL: &str = "https://www.google.com/generate_204";
+
+/// Tunnelled requests regularly need several seconds; a tighter deadline reports
+/// false failures.
+const EGRESS_PROBE_TIMEOUT_SECS: &str = "15";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -60,10 +68,18 @@ pub fn probe_egress(
         }
         _ => return EgressReport::unknown("no overseas transport configured"),
     };
-    let mut args: Vec<String> = ["-sS", "-m", "8", "-o", "/dev/null", "-w", "%{http_code}"]
-        .iter()
-        .map(|arg| (*arg).to_string())
-        .collect();
+    let mut args: Vec<String> = [
+        "-sS",
+        "-m",
+        EGRESS_PROBE_TIMEOUT_SECS,
+        "-o",
+        "/dev/null",
+        "-w",
+        "%{http_code}",
+    ]
+    .iter()
+    .map(|arg| (*arg).to_string())
+    .collect();
     match transport {
         TunnelTransport::Vless => {
             args.push("-x".into());
@@ -76,12 +92,30 @@ pub fn probe_egress(
     }
     args.push(EGRESS_PROBE_URL.to_string());
     let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-    let report = match runner.run("curl", &argv) {
-        Ok(out) if out.status == Some(0) && out.stdout.trim() == "204" => EgressReport {
-            status: EgressStatus::Reachable,
-            detail: format!("{label}: HTTP 204"),
-            checked_at: now_secs(),
+    // A single tunnelled request is occasionally slow enough to look like an
+    // outage, so confirm a failure once before reporting it.
+    let mut last = probe_once(runner, &argv);
+    if last.0 != Some(true) {
+        last = probe_once(runner, &argv);
+    }
+    let (ok, detail) = last;
+    EgressReport {
+        status: if ok == Some(true) {
+            EgressStatus::Reachable
+        } else {
+            EgressStatus::Unreachable
         },
+        detail: format!("{label}: {detail}"),
+        checked_at: now_secs(),
+    }
+}
+
+/// Returns `(reached, detail)`; `None` means the probe itself could not run.
+fn probe_once(runner: &impl CommandRunner, argv: &[&str]) -> (Option<bool>, String) {
+    match runner.run("curl", argv) {
+        Ok(out) if out.status == Some(0) && out.stdout.trim() == "204" => {
+            (Some(true), "HTTP 204".into())
+        }
         Ok(out) => {
             let code = out.stdout.trim();
             let detail = if code.is_empty() || code == "000" {
@@ -89,19 +123,10 @@ pub fn probe_egress(
             } else {
                 format!("HTTP {code}")
             };
-            EgressReport {
-                status: EgressStatus::Unreachable,
-                detail: format!("{label}: {detail}"),
-                checked_at: now_secs(),
-            }
+            (Some(false), detail)
         }
-        Err(error) => EgressReport {
-            status: EgressStatus::Unreachable,
-            detail: format!("{label}: {error}"),
-            checked_at: now_secs(),
-        },
-    };
-    report
+        Err(error) => (None, error.to_string()),
+    }
 }
 
 fn first_line(text: &str) -> Option<String> {
