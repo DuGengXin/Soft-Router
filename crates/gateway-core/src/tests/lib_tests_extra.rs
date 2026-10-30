@@ -96,6 +96,11 @@ fn gateway_plan_renders_split_routing() {
     assert!(nft.contents.contains("chain prerouting_nat"));
     assert!(
         nft.contents
+            .contains("ip daddr { 224.0.0.0/4, 255.255.255.255/32 } return"),
+        "broadcast/multicast must not enter the transparent proxy"
+    );
+    assert!(
+        nft.contents
             .contains("iifname \"eth1\" udp dport 53 dnat ip to 192.168.50.1:53")
     );
     assert!(sb.contents.contains("\"dns-in\""));

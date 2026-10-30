@@ -29,3 +29,6 @@ __pycache__/
 *.crt
 *.secret
 *.local
+
+# Local third-party binaries, uploaded to hosts out of band.
+packaging/*.zip

@@ -85,6 +85,8 @@ table inet {table} {{
     ip daddr {{ {lan_ip}, 127.0.0.1 }} tcp dport {{ {ssh}, {ui} }} return
     ip daddr {wan_cidr} return
     ip daddr {{ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 127.0.0.0/8 }} return
+    # Broadcast and multicast stay on the LAN; proxying them breaks discovery services.
+    ip daddr {{ 224.0.0.0/4, 255.255.255.255/32 }} return
     meta l4proto {{ tcp, udp }} tproxy ip to 127.0.0.1:{tproxy} meta mark set {mark}
   }}
   chain output {{
