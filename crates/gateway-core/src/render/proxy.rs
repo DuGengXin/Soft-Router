@@ -290,14 +290,16 @@ fn render_singbox_transport(config: &AppConfig, proxy: Option<&ProxyEndpoint>) -
         overseas_dns
     ]);
     let dns_json = serde_json::to_string(&dns_servers).unwrap_or_else(|_| "[]".into());
+    // Overseas lookups cross the tunnel, so each uncached one costs a full round
+    // trip; a longer TTL keeps repeat lookups local instead of re-crossing it.
     let dns_rules = if config.routing.china_direct {
         r#"[
-      { "rule_set": ["geosite-cn", "geosite-private"], "action": "route", "server": "direct-dns-0" },
-      { "inbound": ["dns-in"], "action": "route", "server": "proxy-dns" }
+      { "rule_set": ["geosite-cn", "geosite-private"], "action": "route", "server": "direct-dns-0", "rewrite_ttl": 600 },
+      { "inbound": ["dns-in"], "action": "route", "server": "proxy-dns", "rewrite_ttl": 600 }
     ]"#
     } else {
         r#"[
-      { "inbound": ["dns-in"], "action": "route", "server": "proxy-dns" }
+      { "inbound": ["dns-in"], "action": "route", "server": "proxy-dns", "rewrite_ttl": 600 }
     ]"#
     };
     let auto_detect = if wan.is_empty() { "true" } else { "false" };

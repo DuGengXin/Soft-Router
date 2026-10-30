@@ -49,11 +49,13 @@ extra_direct_cidrs = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
 policy_table_id = 51820
 
 [dns]
-# 境外域名解析必须穿过隧道，UDP 查询在丢包线路上会直接超时；改用 DoH 走 TCP
-# 可重传。接受 ip、ip:port、tls://host 或 https://host/path。
-# 境外 DoH 端点放在代理出口之后，因此不要配成直连可达的地址。
-overseas = "https://1.1.1.1/dns-query"
-# 以 IP 形式访问 DoH 且证书不含该 IP 时，在这里补 SNI。
+# 境外域名解析必须穿过隧道。默认用 UDP：单次往返即可完成，实测比 DoH 快一个
+# 数量级（DoH 要完整 TCP+TLS 握手，链路抖动时会重试到十几秒）。
+# 若线路丢包严重，可改回 tls://1.1.1.1 或 https://1.1.1.1/dns-query 走 TCP 重传。
+# 接受 ip、ip:port、tls://host 或 https://host/path。
+# 该端点位于代理出口之后，不要配成直连可达的地址。
+overseas = "1.1.1.1"
+# 以 IP 形式访问 TLS/DoH 且证书不含该 IP 时，在这里补 SNI。
 overseas_server_name = ""
 
 

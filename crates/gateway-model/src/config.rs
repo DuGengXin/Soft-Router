@@ -178,8 +178,10 @@ pub struct DnsConfig {
     pub overseas_server_name: String,
 }
 
+/// Plain UDP is preferred: these queries already cross the tunnel, so DoH adds a
+/// TCP+TLS handshake over a high-latency path without protecting anything extra.
 pub fn default_overseas_dns() -> String {
-    "https://1.1.1.1/dns-query".into()
+    "1.1.1.1".into()
 }
 
 impl Default for DnsConfig {

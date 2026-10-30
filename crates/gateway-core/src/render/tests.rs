@@ -117,11 +117,12 @@ fn singbox_routes_vless_proxy_uri_through_local_socks_without_wireguard() {
     assert_eq!(value["dns"]["servers"][0]["tag"], "direct-dns-0");
     assert_eq!(value["dns"]["servers"][0]["type"], "udp");
     assert_eq!(value["dns"]["servers"][1]["tag"], "proxy-dns");
-    assert_eq!(value["dns"]["servers"][1]["type"], "https");
+    assert_eq!(value["dns"]["servers"][1]["type"], "udp");
     assert_eq!(value["dns"]["servers"][1]["server"], "1.1.1.1");
-    assert_eq!(value["dns"]["servers"][1]["server_port"], 443);
-    assert_eq!(value["dns"]["servers"][1]["path"], "/dns-query");
+    assert_eq!(value["dns"]["servers"][1]["server_port"], 53);
+    assert!(value["dns"]["servers"][1].get("path").is_none());
     assert_eq!(value["dns"]["servers"][1]["detour"], "proxy-out");
+    assert_eq!(value["dns"]["rules"][1]["rewrite_ttl"], 600);
     assert_eq!(value["dns"]["rules"][0]["rule_set"][0], "geosite-cn");
     assert_eq!(value["dns"]["rules"][0]["rule_set"][1], "geosite-private");
     assert_eq!(value["dns"]["rules"][0]["server"], "direct-dns-0");
