@@ -4,6 +4,9 @@ use super::proxy::ProxyEndpoint;
 use gateway_model::{AppConfig, XRAY_SOCKS_PORT};
 use serde_json::{Value, json};
 
+/// Streams multiplexed over one tunnelled connection.
+const MUX_CONCURRENCY: u8 = 8;
+
 pub(super) fn render(_config: &AppConfig, proxy: &ProxyEndpoint) -> String {
     let inbound = json!({
         "listen": "127.0.0.1",
@@ -33,6 +36,14 @@ pub(super) fn render(_config: &AppConfig, proxy: &ProxyEndpoint) -> String {
     let outbound = json!({
         "protocol": "vless",
         "settings": { "vnext": [vnext] },
+        // Multiplexing matters on lossy paths: each fresh handshake is another
+        // chance to stall on SYN retransmission, so reuse a few long-lived
+        // connections instead of dialling per request.
+        "mux": {
+            "enabled": true,
+            "concurrency": MUX_CONCURRENCY,
+            "xudpConcurrency": MUX_CONCURRENCY
+        },
         "streamSettings": {
             "network": "tcp",
             "security": security,

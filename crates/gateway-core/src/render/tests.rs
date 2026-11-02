@@ -142,3 +142,25 @@ fn singbox_rejects_malformed_proxy_uri() {
     };
     assert!(render_singbox_with_secrets(&cfg, &secrets).is_err());
 }
+
+#[test]
+fn xray_outbound_enables_mux_for_lossy_paths() {
+    let cfg = AppConfig {
+        wan: gateway_model::InterfaceConfig {
+            interface: "eth0".into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let secrets = Secrets {
+        proxy_uri: Some(
+            "vless://11111111-1111-1111-1111-111111111111@example.com:443?sni=example.org&security=reality&pbk=public-key&sid=short-id&fp=chrome"
+                .into(),
+        ),
+        ..Secrets::default()
+    };
+    let raw = super::render_xray_with_secrets(&cfg, &secrets).expect("xray render");
+    let value: serde_json::Value = serde_json::from_str(&raw).expect(&raw);
+    assert_eq!(value["outbounds"][0]["mux"]["enabled"], true);
+    assert_eq!(value["outbounds"][0]["mux"]["concurrency"], 8);
+}
