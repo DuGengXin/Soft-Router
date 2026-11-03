@@ -16,7 +16,7 @@
   域名）本就走直连解析器，不再绕道境外。
 - 境内域名仍由 `direct-dns-0` 直连 UDP 解析，行为不变。
 
-验证（2026-10-19，192.111.40.33）：`sing-box check` 通过；`gateway-kit apply
+验证（2026-10-19，生产网关）：`sing-box check` 通过；`gateway-kit apply
 --confirm` 生成 g1792391767-605934703 且无回滚；四单元 active；经隧道 DoH
 实测 Cloudflare 端点 0.68 s 返回正确 A 记录；LAN 侧 `www.google.com` 443 ms、
 `github.com` 119 ms 均为 NOERROR，直连的 `www.baidu.com` 7 ms 不变。

@@ -6,7 +6,7 @@ fn nftables_allows_routed_traffic_between_wan_and_lan() {
     let cfg = AppConfig {
         wan: gateway_model::InterfaceConfig {
             interface: "enp4s0".into(),
-            address: Some("192.111.40.33/24".into()),
+            address: Some("203.0.113.10/24".into()),
             gateway: Some("192.111.40.1".into()),
             ..Default::default()
         },

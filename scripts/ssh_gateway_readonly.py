@@ -7,6 +7,7 @@ Paramiko: python -m pip install paramiko
 from __future__ import annotations
 
 import getpass
+import os
 import sys
 
 try:
@@ -15,8 +16,9 @@ except ImportError:
     print("Missing dependency: paramiko. Install with: python -m pip install paramiko", file=sys.stderr)
     raise SystemExit(2)
 
-HOST = "192.111.40.33"
-USER = "root"
+# Never hardcode a deployment address here: this file is committed.
+HOST = os.environ.get("GATEWAY_HOST", "")
+USER = os.environ.get("GATEWAY_USER", "root")
 COMMAND = r'''set +e
 printf '\n===== HOST/TIME =====\n'; hostname; date -Is
 printf '\n===== SERVICE =====\n'; systemctl --no-pager --full status gateway-kit; printf '\n-- is-enabled --\n'; systemctl is-enabled gateway-kit 2>&1
@@ -32,6 +34,9 @@ printf '\n===== RECENT LOGS =====\n'; journalctl -u gateway-kit -u sing-box -u d
 '''
 
 def main() -> None:
+    if not HOST:
+        print("Set GATEWAY_HOST to the gateway address, e.g. GATEWAY_HOST=10.0.0.1", file=sys.stderr)
+        raise SystemExit(2)
     password = getpass.getpass(f"SSH password for {USER}@{HOST} (input hidden): ")
     client = paramiko.SSHClient()
     client.load_system_host_keys()
