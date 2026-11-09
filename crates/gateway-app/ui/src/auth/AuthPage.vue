@@ -98,7 +98,7 @@ async function login() {
 
 async function changePassword() {
   error.value = "";
-  if (newPassword.value.length < 12) {
+  if (newPassword.value.length < 6) {
     error.value = "新密码至少需要 6 个字符。";
     return;
   }
