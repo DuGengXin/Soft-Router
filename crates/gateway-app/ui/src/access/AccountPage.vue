@@ -26,7 +26,7 @@
             </el-form-item>
             <el-form-item label="新密码">
               <el-input v-model="newPassword" type="password" show-password autocomplete="new-password" />
-              <div class="field-note">至少 12 个字符；服务端只保存 Argon2id 哈希</div>
+              <div class="field-note">至少 12 个字符即可</div>
             </el-form-item>
             <el-form-item label="确认新密码">
               <el-input v-model="confirmPassword" type="password" show-password autocomplete="new-password" @keyup.enter="save" />

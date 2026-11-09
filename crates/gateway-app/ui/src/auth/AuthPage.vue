@@ -37,7 +37,7 @@
             <el-form-item label="确认新密码">
               <el-input v-model="confirmPassword" type="password" show-password autocomplete="new-password" @keyup.enter="changePassword" />
             </el-form-item>
-            <p class="password-note">至少 12 个字符。密码只保存为 Argon2id 哈希。</p>
+            <p class="password-note">至少 12 个字符即可</p>
             <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
             <el-button class="submit" type="primary" :loading="busy" @click="changePassword">保存并进入控制台</el-button>
           </el-form>
