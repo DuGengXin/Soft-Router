@@ -12,7 +12,7 @@ use axum::{Json, Router};
 use gateway_core::{
     Paths, SystemCommandRunner, check_applied_with_xray_artifact, default_or_load_config,
     init_database, load_secrets, probe_uplinks, recent_events, sample_host, save_secrets,
-    validate_proxy_uri,
+    validate_proxy_uri, validate_socks_proxy_uri,
 };
 use gateway_model::{
     AppConfig, OperatingMode, SecretsPatch, parse_wireguard_blob, wan_direct_cidr,
@@ -258,9 +258,10 @@ async fn get_config(State(state): State<AppState>) -> impl IntoResponse {
 
 async fn put_config(
     State(state): State<AppState>,
-    Json(config): Json<AppConfig>,
+    Json(mut config): Json<AppConfig>,
 ) -> impl IntoResponse {
     let secrets = load_secrets(&state.paths.secrets).unwrap_or_default();
+    config.sync_wireguard_enabled_with_transport(&secrets);
     match config.validate(&secrets) {
         Ok(_) => match state.service.save_config(&config) {
             Ok(()) => Json(serde_json::json!({"saved": true})).into_response(),
@@ -287,6 +288,15 @@ async fn put_secrets(
         .map(str::trim)
         .filter(|uri| !uri.is_empty())
         && let Err(error) = validate_proxy_uri(proxy_uri)
+    {
+        return (StatusCode::BAD_REQUEST, error.to_string()).into_response();
+    }
+    if let Some(socks_uri) = patch
+        .socks_proxy_uri
+        .as_deref()
+        .map(str::trim)
+        .filter(|uri| !uri.is_empty())
+        && let Err(error) = validate_socks_proxy_uri(socks_uri)
     {
         return (StatusCode::BAD_REQUEST, error.to_string()).into_response();
     }
@@ -369,8 +379,10 @@ fn dataplane_json(paths: &Paths, config: &AppConfig) -> serde_json::Value {
     let geo_cache = paths.generated_dir.join("sing-box-cache.db");
     let singbox_config = paths.generated_dir.join("sing-box.json");
     let xray_config = paths.generated_dir.join("xray.json");
+    let secrets = load_secrets(&paths.secrets).unwrap_or_default();
     serde_json::to_value(check_applied_with_xray_artifact(
         config,
+        &secrets,
         &SystemCommandRunner,
         paths.manages_host_units(),
         Some(&singbox_config),

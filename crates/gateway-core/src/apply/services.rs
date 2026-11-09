@@ -13,13 +13,11 @@ pub(super) fn start_data_plane_units(
     secrets: &Secrets,
     runner: &impl CommandRunner,
 ) {
+    let transport = config.tunnel_transport(secrets);
+    let use_xray = transport == gateway_model::TunnelTransport::Vless;
     if uses_product_systemd(paths) {
         let _ = runner.run("systemctl", &["enable", "gateway-kit-singbox"]);
-        if secrets
-            .proxy_uri
-            .as_deref()
-            .is_some_and(|uri| !uri.trim().is_empty())
-        {
+        if use_xray {
             let _ = runner.run("systemctl", &["enable", "gateway-kit-xray"]);
         } else {
             let _ = runner.run("systemctl", &["disable", "--now", "gateway-kit-xray"]);
@@ -30,11 +28,7 @@ pub(super) fn start_data_plane_units(
             let _ = runner.run("systemctl", &["disable", "--now", "gateway-kit-dnsmasq"]);
         }
     }
-    if secrets
-        .proxy_uri
-        .as_deref()
-        .is_some_and(|uri| !uri.trim().is_empty())
-    {
+    if use_xray {
         let _ = runner.run("systemctl", &["restart", "gateway-kit-xray"]);
     }
     let _ = runner.run("systemctl", &["restart", "gateway-kit-singbox"]);

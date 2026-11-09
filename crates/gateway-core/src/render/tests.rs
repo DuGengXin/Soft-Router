@@ -144,6 +144,41 @@ fn singbox_rejects_malformed_proxy_uri() {
 }
 
 #[test]
+fn singbox_routes_socks_relay_without_local_xray() {
+    let cfg = AppConfig {
+        overseas_transport: Some(gateway_model::TunnelTransport::Socks),
+        ..AppConfig::default()
+    };
+    let secrets = Secrets {
+        proxy_uri: Some(
+            "vless://11111111-1111-1111-1111-111111111111@example.com:443?security=tls".into(),
+        ),
+        socks_proxy_uri: Some("socks5://10.10.10.10:10808".into()),
+        ..Secrets::default()
+    };
+    let raw = render_singbox_with_secrets(&cfg, &secrets).expect("socks relay");
+    let value: serde_json::Value = serde_json::from_str(&raw).expect(&raw);
+    assert_eq!(value["route"]["final"], "proxy-out");
+    assert_eq!(value["outbounds"][1]["type"], "socks");
+    assert_eq!(value["outbounds"][1]["server"], "10.10.10.10");
+    assert_eq!(value["outbounds"][1]["server_port"], 10808);
+}
+
+#[test]
+fn socks_selection_ignores_malformed_unused_vless_uri() {
+    let cfg = AppConfig {
+        overseas_transport: Some(gateway_model::TunnelTransport::Socks),
+        ..AppConfig::default()
+    };
+    let secrets = Secrets {
+        proxy_uri: Some("https://example.com/not-vless".into()),
+        socks_proxy_uri: Some("socks5://10.10.10.10:10808".into()),
+        ..Secrets::default()
+    };
+    assert!(render_singbox_with_secrets(&cfg, &secrets).is_ok());
+}
+
+#[test]
 fn xray_outbound_enables_mux_for_lossy_paths() {
     let cfg = AppConfig {
         wan: gateway_model::InterfaceConfig {

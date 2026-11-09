@@ -9,4 +9,4 @@
 | 代际 | 一次已确认 apply 的配置快照，可回滚 |
 | 旁路 | 撤走本产品 nft/策略路由/本产品拉起的数据面单元 |
 | 直连 | 经 WAN 与路由器 A 出网，不进隧道 |
-| 隧道 | WireGuard 至用户 VPS，或 Xray-core 使用 VLESS 链接至用户 VPS；sing-box 将分流流量交给本机 SOCKS5 桥接 |
+| 隧道 | 境外出口三选一（运行时互斥，凭证可分槽并存）：WireGuard 至用户 VPS；Xray-core VLESS 至用户 VPS（sing-box → 本机 SOCKS5）；或 SOCKS5 中继（sing-box 直连远端，如经 EasyTier 到家中） |

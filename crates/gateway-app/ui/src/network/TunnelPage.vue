@@ -1,15 +1,17 @@
 <template>
   <el-card shadow="never" v-loading="loading">
-    <template #header>隧道 · 到 VPS（WireGuard / VLESS）</template>
+    <template #header>隧道 · 境外出口（WireGuard / VLESS / SOCKS 中继）</template>
     <el-form v-if="form" :model="form" label-width="140px">
       <el-form-item label="出口方式">
         <el-radio-group v-model="transport" class="transport-group">
           <el-radio-button value="none">不启用</el-radio-button>
           <el-radio-button value="wireguard">WireGuard</el-radio-button>
           <el-radio-button value="vless">VLESS 链接</el-radio-button>
+          <el-radio-button value="socks">SOCKS 中继</el-radio-button>
         </el-radio-group>
         <div class="hint">
-          网关模式必须选择一种出口；WireGuard 与 VLESS 只能二选一，保存时会清除另一方的凭证。
+          网关模式必须选择一种出口。切换出口不会清空其它已存凭证，可一键切回。
+          SOCKS 中继适用于经 EasyTier 等到家中/中继的 Mixed/SOCKS 端口。
         </div>
       </el-form-item>
 
@@ -17,9 +19,37 @@
         <el-form-item label="VLESS/Xray 链接">
           <el-input v-model="proxyUri" type="textarea" :rows="3" placeholder="vless://..." />
           <div class="hint">
-            链接直接写入 secrets.toml（600），是唯一的隧道凭证，无需再填 WireGuard 字段。
-            计划页不会回显明文；当前支持 TCP + TLS/REALITY 传输。
+            留空并保存时保留已存链接。写入 secrets.toml（600），计划页不回显明文。
+            当前支持 TCP + TLS/REALITY。
           </div>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="danger" plain :disabled="!lastStatus.proxy_uri_present" @click="clearVless">
+            清除 VLESS 凭证
+          </el-button>
+        </el-form-item>
+      </template>
+
+      <template v-if="transport === 'socks'">
+        <el-form-item label="SOCKS 主机">
+          <el-input v-model="socksHost" placeholder="10.10.10.10" />
+        </el-form-item>
+        <el-form-item label="端口">
+          <el-input v-model.number="socksPort" placeholder="10808" />
+        </el-form-item>
+        <el-form-item label="用户名（可选）">
+          <el-input v-model="socksUser" autocomplete="off" />
+        </el-form-item>
+        <el-form-item label="密码（可选）">
+          <el-input v-model="socksPass" type="password" show-password autocomplete="new-password" />
+        </el-form-item>
+        <div class="hint">
+          保存时写入 socks5://…；若主机留空且已有凭证，则只切换出口不改地址。
+        </div>
+        <el-form-item>
+          <el-button type="danger" plain :disabled="!lastStatus.socks_proxy_uri_present" @click="clearSocks">
+            清除 SOCKS 凭证
+          </el-button>
         </el-form-item>
       </template>
 
@@ -68,12 +98,13 @@ import { onMounted, ref } from "vue";
 import { api, ElMessage } from "../api/client";
 import { type Cfg, loadConfig, saveConfig } from "../api/config";
 
-type Transport = "none" | "wireguard" | "vless";
+type Transport = "none" | "wireguard" | "vless" | "socks";
 
 type SecretsStatus = {
   wireguard_private_key_present?: boolean;
   wireguard_peer_public_key_present?: boolean;
   proxy_uri_present?: boolean;
+  socks_proxy_uri_present?: boolean;
 };
 
 const loading = ref(true);
@@ -85,11 +116,16 @@ const wgPriv = ref("");
 const wgPub = ref("");
 const wgPsk = ref("");
 const proxyUri = ref("");
+const socksHost = ref("");
+const socksPort = ref(10808);
+const socksUser = ref("");
+const socksPass = ref("");
 const lastStatus = ref<SecretsStatus>({});
 
 function describe(sec: SecretsStatus) {
   const parts: string[] = [];
-  if (sec.proxy_uri_present) parts.push("VLESS 链接已存");
+  if (sec.proxy_uri_present) parts.push("VLESS 已存");
+  if (sec.socks_proxy_uri_present) parts.push("SOCKS 已存");
   if (sec.wireguard_private_key_present && sec.wireguard_peer_public_key_present) {
     parts.push("WireGuard 密钥已存");
   } else if (sec.wireguard_private_key_present || sec.wireguard_peer_public_key_present) {
@@ -103,6 +139,19 @@ async function refreshSecrets() {
   lastStatus.value = sec;
   secretStatus.value = describe(sec);
   return sec;
+}
+
+function buildSocksUri(): string | null {
+  const host = socksHost.value.trim();
+  if (!host) return null;
+  const port = Number(socksPort.value) || 10808;
+  const user = socksUser.value.trim();
+  const pass = socksPass.value;
+  if (user) {
+    const auth = pass ? `${encodeURIComponent(user)}:${encodeURIComponent(pass)}@` : `${encodeURIComponent(user)}@`;
+    return `socks5://${auth}${host}:${port}`;
+  }
+  return `socks5://${host}:${port}`;
 }
 
 async function parseBlob() {
@@ -129,24 +178,52 @@ async function parseBlob() {
   ElMessage.success("已解析，请核对后保存");
 }
 
+function resolveTransport(cfg: Cfg, sec: SecretsStatus): Transport {
+  if (cfg.overseas_transport === "wireguard" || cfg.overseas_transport === "vless" || cfg.overseas_transport === "socks" || cfg.overseas_transport === "none") {
+    return cfg.overseas_transport;
+  }
+  if (cfg.wireguard.enabled) return "wireguard";
+  if (sec.proxy_uri_present) return "vless";
+  if (sec.socks_proxy_uri_present) return "socks";
+  return "none";
+}
+
 onMounted(async () => {
   try {
     form.value = await loadConfig();
     const sec = await refreshSecrets();
-    if (form.value.wireguard.enabled) transport.value = "wireguard";
-    else if (sec.proxy_uri_present) transport.value = "vless";
-    else transport.value = "none";
+    transport.value = resolveTransport(form.value, sec);
   } finally {
     loading.value = false;
   }
 });
 
+async function clearVless() {
+  await api("/api/v1/secrets", { method: "PUT", body: JSON.stringify({ proxy_uri: "" }) });
+  proxyUri.value = "";
+  await refreshSecrets();
+  ElMessage.success("已清除 VLESS 凭证");
+}
+
+async function clearSocks() {
+  await api("/api/v1/secrets", { method: "PUT", body: JSON.stringify({ socks_proxy_uri: "" }) });
+  socksHost.value = "";
+  socksUser.value = "";
+  socksPass.value = "";
+  await refreshSecrets();
+  ElMessage.success("已清除 SOCKS 凭证");
+}
+
 async function save() {
   if (!form.value) return;
-  if (transport.value === "vless" && !proxyUri.value.trim()) {
-    const sec = await refreshSecrets();
-    if (!sec.proxy_uri_present) {
-      ElMessage.error("请粘贴 VLESS 链接");
+  if (transport.value === "vless" && !proxyUri.value.trim() && !lastStatus.value.proxy_uri_present) {
+    ElMessage.error("请粘贴 VLESS 链接");
+    return;
+  }
+  if (transport.value === "socks") {
+    const built = buildSocksUri();
+    if (!built && !lastStatus.value.socks_proxy_uri_present) {
+      ElMessage.error("请填写 SOCKS 主机与端口");
       return;
     }
   }
@@ -160,6 +237,8 @@ async function save() {
       return;
     }
   }
+
+  form.value.overseas_transport = transport.value;
   form.value.wireguard.enabled = transport.value === "wireguard";
 
   const patch: Record<string, string> = {};
@@ -169,15 +248,19 @@ async function save() {
   if (transport.value === "vless" && proxyUri.value.trim()) {
     patch.proxy_uri = proxyUri.value.trim();
   }
-  if (transport.value !== "vless") {
-    // Empty string clears the stored link: the two transports are mutually exclusive.
-    patch.proxy_uri = "";
+  if (transport.value === "socks") {
+    const built = buildSocksUri();
+    if (built) patch.socks_proxy_uri = built;
   }
-  await api("/api/v1/secrets", { method: "PUT", body: JSON.stringify(patch) });
+  // Do not clear other credential slots when switching transport.
+  if (Object.keys(patch).length > 0) {
+    await api("/api/v1/secrets", { method: "PUT", body: JSON.stringify(patch) });
+  }
   wgPriv.value = "";
   wgPub.value = "";
   wgPsk.value = "";
   proxyUri.value = "";
+  socksPass.value = "";
   await saveConfig(form.value);
   await refreshSecrets();
 }

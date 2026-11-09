@@ -60,9 +60,14 @@ pub fn probe_egress(
     runner: &impl CommandRunner,
     transport: TunnelTransport,
     wireguard_interface: &str,
+    socks_proxy_uri: Option<&str>,
 ) -> EgressReport {
     let label = match transport {
         TunnelTransport::Vless => format!("VLESS via Xray SOCKS :{XRAY_SOCKS_PORT}"),
+        TunnelTransport::Socks => match socks_proxy_uri {
+            Some(uri) if !uri.trim().is_empty() => format!("SOCKS relay {uri}"),
+            _ => return EgressReport::unknown("SOCKS relay URI not configured"),
+        },
         TunnelTransport::Wireguard if !wireguard_interface.is_empty() => {
             format!("WireGuard {wireguard_interface}")
         }
@@ -84,6 +89,21 @@ pub fn probe_egress(
         TunnelTransport::Vless => {
             args.push("-x".into());
             args.push(format!("socks5h://127.0.0.1:{XRAY_SOCKS_PORT}"));
+        }
+        TunnelTransport::Socks => {
+            let Some(uri) = socks_proxy_uri.map(str::trim).filter(|uri| !uri.is_empty()) else {
+                return EgressReport::unknown("SOCKS relay URI not configured");
+            };
+            args.push("-x".into());
+            // Prefer hostname DNS through the proxy when the URI is socks5://.
+            let proxy = if uri.starts_with("socks5://") {
+                uri.replacen("socks5://", "socks5h://", 1)
+            } else if uri.starts_with("socks://") {
+                uri.replacen("socks://", "socks5h://", 1)
+            } else {
+                uri.to_string()
+            };
+            args.push(proxy);
         }
         _ => {
             args.push("--interface".into());
@@ -141,7 +161,14 @@ pub fn check_applied(
     runner: &impl CommandRunner,
     require_tproxy: bool,
 ) -> HealthSnapshot {
-    check_applied_with_artifacts(config, runner, require_tproxy, None, None)
+    check_applied_with_artifacts(
+        config,
+        &gateway_model::Secrets::default(),
+        runner,
+        require_tproxy,
+        None,
+        None,
+    )
 }
 
 /// Check applied dataplane state and, when requested, the GeoFile cache.
@@ -151,12 +178,20 @@ pub fn check_applied_with_cache(
     require_tproxy: bool,
     geo_cache: Option<&Path>,
 ) -> HealthSnapshot {
-    check_applied_with_artifacts(config, runner, require_tproxy, None, geo_cache)
+    check_applied_with_artifacts(
+        config,
+        &gateway_model::Secrets::default(),
+        runner,
+        require_tproxy,
+        None,
+        geo_cache,
+    )
 }
 
 /// Check applied dataplane state and validate the generated sing-box artifact.
 pub fn check_applied_with_artifacts(
     config: &AppConfig,
+    secrets: &gateway_model::Secrets,
     runner: &impl CommandRunner,
     require_tproxy: bool,
     singbox_config: Option<&Path>,
@@ -164,6 +199,7 @@ pub fn check_applied_with_artifacts(
 ) -> HealthSnapshot {
     check_applied_with_xray_artifact(
         config,
+        secrets,
         runner,
         require_tproxy,
         singbox_config,
@@ -175,6 +211,7 @@ pub fn check_applied_with_artifacts(
 /// Check generated Xray configuration, its service, and local SOCKS listener when configured.
 pub fn check_applied_with_xray_artifact(
     config: &AppConfig,
+    secrets: &gateway_model::Secrets,
     runner: &impl CommandRunner,
     require_tproxy: bool,
     singbox_config: Option<&Path>,
@@ -183,13 +220,7 @@ pub fn check_applied_with_xray_artifact(
 ) -> HealthSnapshot {
     let mut failed = Vec::new();
     let mut notes = Vec::new();
-    let transport = if config.wireguard.enabled {
-        TunnelTransport::Wireguard
-    } else if xray_config.is_some_and(|path| path.is_file()) {
-        TunnelTransport::Vless
-    } else {
-        TunnelTransport::None
-    };
+    let transport = config.tunnel_transport(secrets);
     let (wan_uplink, tunnel_uplink, mut link_notes) = probe_uplinks(config, runner, transport);
     notes.append(&mut link_notes);
     if require_tproxy && wan_uplink == "down" {
@@ -230,7 +261,7 @@ pub fn check_applied_with_xray_artifact(
             Err(error) => failed.push(error.to_string()),
         }
     }
-    if config.wireguard.enabled && !config.wireguard.interface.is_empty() {
+    if transport == TunnelTransport::Wireguard && !config.wireguard.interface.is_empty() {
         match runner.run(
             "ip",
             &["-o", "link", "show", "dev", &config.wireguard.interface],
@@ -277,7 +308,9 @@ pub fn check_applied_with_xray_artifact(
             Err(error) => failed.push(error.to_string()),
         }
         check_unit(runner, "gateway-kit-singbox", &mut failed);
-        if let Some(path) = xray_config.filter(|path| path.is_file()) {
+        if transport == TunnelTransport::Vless
+            && let Some(path) = xray_config.filter(|path| path.is_file())
+        {
             match runner.run(
                 "xray",
                 &["run", "-test", "-c", path.to_str().unwrap_or("xray.json")],
@@ -388,6 +421,10 @@ pub fn probe_uplinks(
             // Xray owns the VLESS handshake; the post-apply check covers its service and SOCKS listener.
             "unknown".into()
         }
+        TunnelTransport::Socks => {
+            // Reachability is proven by the overseas egress probe through the relay.
+            "unknown".into()
+        }
         TunnelTransport::None => "idle".into(),
     };
     (wan_uplink, tunnel_uplink, notes)
@@ -415,7 +452,7 @@ mod tests {
     fn egress_probe_reports_reachable_on_204() {
         let runner = ScriptedRunner::default();
         runner.push_ok("curl", "204");
-        let report = probe_egress(&runner, TunnelTransport::Vless, "wg0");
+        let report = probe_egress(&runner, TunnelTransport::Vless, "wg0", None);
         assert_eq!(report.status, EgressStatus::Reachable);
         assert!(report.detail.contains("VLESS"));
     }
@@ -424,14 +461,14 @@ mod tests {
     fn egress_probe_reports_unreachable_without_status() {
         let runner = ScriptedRunner::default();
         runner.push_ok("curl", "000");
-        let report = probe_egress(&runner, TunnelTransport::Vless, "wg0");
+        let report = probe_egress(&runner, TunnelTransport::Vless, "wg0", None);
         assert_eq!(report.status, EgressStatus::Unreachable);
     }
 
     #[test]
     fn egress_probe_is_unknown_without_a_transport() {
         let runner = ScriptedRunner::default();
-        let report = probe_egress(&runner, TunnelTransport::None, "wg0");
+        let report = probe_egress(&runner, TunnelTransport::None, "wg0", None);
         assert_eq!(report.status, EgressStatus::Unknown);
     }
 

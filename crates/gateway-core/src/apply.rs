@@ -163,7 +163,7 @@ pub fn apply_plan(
             &table_id,
         ],
     )?;
-    if config.wireguard.enabled {
+    if config.tunnel_transport(secrets) == gateway_model::TunnelTransport::Wireguard {
         apply_wireguard(runner, paths, config)?;
     }
     start_forwarding_unit(paths, runner);
@@ -177,6 +177,7 @@ pub fn apply_plan(
     let xray_config = paths.generated_dir.join("xray.json");
     let health = crate::check_applied_with_xray_artifact(
         config,
+        secrets,
         runner,
         paths.manages_host_units(),
         Some(&singbox_config),

@@ -104,13 +104,56 @@ fn tunnel_transport_tracks_the_configured_egress() {
 
     cfg.wireguard.enabled = true;
     assert_eq!(cfg.tunnel_transport(&secrets), TunnelTransport::Wireguard);
+
+    cfg.overseas_transport = Some(TunnelTransport::Socks);
+    secrets.socks_proxy_uri = Some("socks5://10.10.10.10:10808".into());
+    assert_eq!(cfg.tunnel_transport(&secrets), TunnelTransport::Socks);
 }
 
 #[test]
-fn gateway_rejects_two_overseas_transports() {
+fn gateway_rejects_two_overseas_transports_when_unspecified() {
     let (cfg, mut secrets) = valid_gateway();
     secrets.proxy_uri = Some("vless://uuid@example.com:443".into());
     assert!(cfg.validate(&secrets).is_err());
+}
+
+#[test]
+fn gateway_allows_stored_vless_and_socks_when_socks_selected() {
+    let (mut cfg, mut secrets) = valid_gateway();
+    cfg.wireguard.enabled = false;
+    cfg.overseas_transport = Some(TunnelTransport::Socks);
+    secrets.proxy_uri = Some("vless://uuid@example.com:443".into());
+    secrets.socks_proxy_uri = Some("socks5://10.10.10.10:10808".into());
+    assert!(cfg.validate(&secrets).is_ok());
+    cfg.overseas_transport = Some(TunnelTransport::Vless);
+    assert!(cfg.validate(&secrets).is_ok());
+}
+
+#[test]
+fn switching_transport_keeps_other_secret_slots() {
+    let mut secrets = Secrets {
+        proxy_uri: Some("vless://uuid@example.com:443".into()),
+        socks_proxy_uri: Some("socks5://10.10.10.10:10808".into()),
+        ..Secrets::default()
+    };
+    secrets.apply_patch(&SecretsPatch {
+        // Selecting SOCKS in the UI must not clear VLESS.
+        ..SecretsPatch::default()
+    });
+    assert!(secrets.status().proxy_uri_present);
+    assert!(secrets.status().socks_proxy_uri_present);
+    secrets.apply_patch(&SecretsPatch {
+        socks_proxy_uri: Some("socks5://10.10.10.11:10808".into()),
+        ..SecretsPatch::default()
+    });
+    assert_eq!(
+        secrets.proxy_uri.as_deref(),
+        Some("vless://uuid@example.com:443")
+    );
+    assert_eq!(
+        secrets.socks_proxy_uri.as_deref(),
+        Some("socks5://10.10.10.11:10808")
+    );
 }
 
 #[test]
@@ -135,6 +178,15 @@ fn secrets_patch_overlays_without_clearing_omitted_fields() {
         secrets.proxy_uri.as_deref(),
         Some("vless://uuid@example.com:443")
     );
+    secrets.apply_patch(&SecretsPatch {
+        socks_proxy_uri: Some(" socks5://10.10.10.10:10808 ".into()),
+        ..SecretsPatch::default()
+    });
+    assert_eq!(
+        secrets.socks_proxy_uri.as_deref(),
+        Some("socks5://10.10.10.10:10808")
+    );
+    assert!(secrets.status().proxy_uri_present);
 }
 
 #[test]

@@ -213,7 +213,11 @@ pub struct Secrets {
     pub wireguard_private_key: Option<String>,
     pub wireguard_peer_public_key: Option<String>,
     pub wireguard_preshared_key: Option<String>,
+    /// VLESS link (`vless://...`). Kept when switching away from VLESS.
     pub proxy_uri: Option<String>,
+    /// SOCKS relay (`socks5://host:port`, optional userinfo). Kept when switching away.
+    #[serde(default)]
+    pub socks_proxy_uri: Option<String>,
     pub admin_username: Option<String>,
     pub admin_password_hash: Option<String>,
     #[serde(default)]
@@ -226,6 +230,7 @@ pub struct SecretsPatch {
     pub wireguard_peer_public_key: Option<String>,
     pub wireguard_preshared_key: Option<String>,
     pub proxy_uri: Option<String>,
+    pub socks_proxy_uri: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -234,6 +239,7 @@ pub struct SecretsStatus {
     pub wireguard_peer_public_key_present: bool,
     pub wireguard_preshared_key_present: bool,
     pub proxy_uri_present: bool,
+    pub socks_proxy_uri_present: bool,
     pub admin_account_configured: bool,
 }
 
@@ -244,6 +250,7 @@ impl Secrets {
             wireguard_peer_public_key_present: present_secret(&self.wireguard_peer_public_key),
             wireguard_preshared_key_present: present_secret(&self.wireguard_preshared_key),
             proxy_uri_present: present_secret(&self.proxy_uri),
+            socks_proxy_uri_present: present_secret(&self.socks_proxy_uri),
             admin_account_configured: self
                 .admin_username
                 .as_deref()
@@ -266,6 +273,7 @@ impl Secrets {
             &patch.wireguard_preshared_key,
         );
         overlay_trimmed(&mut self.proxy_uri, &patch.proxy_uri);
+        overlay_trimmed(&mut self.socks_proxy_uri, &patch.socks_proxy_uri);
     }
 }
 

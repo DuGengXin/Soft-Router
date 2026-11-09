@@ -22,7 +22,7 @@ pub use monitor::sample_host;
 pub use plan::build_plan;
 pub use render::{
     render_dnsmasq, render_forwarding_env, render_nftables, render_singbox,
-    render_singbox_with_secrets, render_wg_quick, validate_proxy_uri,
+    render_singbox_with_secrets, render_wg_quick, validate_proxy_uri, validate_socks_proxy_uri,
 };
 
 use gateway_model::{AppConfig, PreflightReport, ProbeStatus, Secrets};

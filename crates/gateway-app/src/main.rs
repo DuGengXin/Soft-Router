@@ -226,8 +226,14 @@ async fn health_watch(paths: Paths, egress: http::EgressCache) {
         let secrets = load_secrets(&paths.secrets).unwrap_or_default();
         let transport = config.tunnel_transport(&secrets);
         let interface = config.wireguard.interface.clone();
+        let socks_uri = secrets.socks_proxy_uri.clone();
         if let Ok(report) = tokio::task::spawn_blocking(move || {
-            probe_egress(&SystemCommandRunner, transport, &interface)
+            probe_egress(
+                &SystemCommandRunner,
+                transport,
+                &interface,
+                socks_uri.as_deref(),
+            )
         })
         .await
             && let Ok(mut slot) = egress.lock()
@@ -250,6 +256,7 @@ async fn health_watch(paths: Paths, egress: http::EgressCache) {
         let xray_config = paths.generated_dir.join("xray.json");
         let health = check_applied_with_xray_artifact(
             &config,
+            &secrets,
             &SystemCommandRunner,
             paths.manages_host_units(),
             Some(&singbox_config),

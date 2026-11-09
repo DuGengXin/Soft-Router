@@ -7,7 +7,7 @@ use crate::render::{
 };
 use gateway_model::{
     ActionKind, AppConfig, ChangePlan, ConflictPolicy, OperatingMode, PlanAction, PlanStatus,
-    PreflightReport, RenderedFile, Secrets,
+    PreflightReport, RenderedFile, Secrets, TunnelTransport,
 };
 
 pub fn build_plan(
@@ -59,17 +59,14 @@ pub fn build_plan(
             contents: render_forwarding_env(config),
         },
     ];
-    if secrets
-        .proxy_uri
-        .as_deref()
-        .is_some_and(|uri| !uri.trim().is_empty())
-    {
+    let transport = config.tunnel_transport(secrets);
+    if transport == TunnelTransport::Vless {
         files.push(RenderedFile {
             relative_path: "xray.json".into(),
             contents: render_xray_with_secrets(config, secrets)?,
         });
     }
-    if config.wireguard.enabled {
+    if transport == TunnelTransport::Wireguard {
         files.push(RenderedFile {
             relative_path: format!("{}.conf", config.wireguard.interface),
             contents: render_wg_quick(config, secrets),
@@ -82,23 +79,33 @@ pub fn build_plan(
         });
     }
 
-    let transport_action = if config.wireguard.enabled {
-        PlanAction {
+    let transport_action = match transport {
+        TunnelTransport::Wireguard => PlanAction {
             id: "wg-sync".into(),
             kind: ActionKind::WgSync,
             summary: "sync WireGuard interface without replacing the main routing table".into(),
-        }
-    } else {
-        PlanAction {
+        },
+        TunnelTransport::Vless => PlanAction {
             id: "proxy-uri".into(),
             kind: ActionKind::Systemctl,
             summary: "start Xray VLESS client and loopback SOCKS bridge".into(),
-        }
+        },
+        TunnelTransport::Socks => PlanAction {
+            id: "socks-relay".into(),
+            kind: ActionKind::Systemctl,
+            summary: "point sing-box overseas outbound at the configured SOCKS relay".into(),
+        },
+        TunnelTransport::None => PlanAction {
+            id: "no-overseas".into(),
+            kind: ActionKind::Systemctl,
+            summary: "no overseas transport selected".into(),
+        },
     };
-    let transport = if config.wireguard.enabled {
-        "WireGuard wg-out"
-    } else {
-        "VLESS proxy-out"
+    let transport_label = match transport {
+        TunnelTransport::Wireguard => "WireGuard wg-out",
+        TunnelTransport::Vless => "VLESS proxy-out",
+        TunnelTransport::Socks => "SOCKS relay proxy-out",
+        TunnelTransport::None => "direct-only",
     };
     let actions = vec![
         PlanAction {
@@ -140,7 +147,7 @@ pub fn build_plan(
             id: "sing-box".into(),
             kind: ActionKind::Systemctl,
             summary: format!(
-                "start sing-box TProxy with generated config (china direct / else {transport})"
+                "start sing-box TProxy with generated config (china direct / else {transport_label})"
             ),
         },
     ];
@@ -148,7 +155,7 @@ pub fn build_plan(
     Ok(ChangePlan {
         status: PlanStatus::Ready,
         explanation: format!(
-            "LAN DNS is hijacked to sing-box; private/China traffic is direct via WAN, other traffic uses {transport}; host SSH/UI bypass tproxy"
+            "LAN DNS is hijacked to sing-box; private/China traffic is direct via WAN, other traffic uses {transport_label}; host SSH/UI bypass tproxy"
         ),
         issues,
         actions,

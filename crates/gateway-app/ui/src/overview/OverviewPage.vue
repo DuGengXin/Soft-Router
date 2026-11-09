@@ -131,12 +131,14 @@ function transportLabel() {
   const t = status.tunnel?.transport;
   if (t === "wireguard") return "WireGuard";
   if (t === "vless") return "VLESS";
+  if (t === "socks") return "SOCKS 中继";
   return "未配置";
 }
 function tunnelDetail() {
   const t = status.tunnel?.transport;
   if (t === "wireguard") return `WireGuard handshake · ${status.tunnel?.wireguard_interface || "wg0"}`;
   if (t === "vless") return "VLESS · Xray 本地 SOCKS 桥接";
+  if (t === "socks") return "SOCKS · 远端中继（如 EasyTier 到家中）";
   return "未启用出口";
 }
 function egressLabel() {

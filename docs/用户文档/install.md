@@ -18,9 +18,9 @@ Linux WireGuard 或 Xray-core VLESS → 用户 VPS（3x-ui/Xray 服务端不在�
 ```
 
 装完打印监听地址 `0.0.0.0:7676`、一次性管理员用户名和随机临时密码，以及当时 `ip -4` 看到的地址（只读，不改地址）。完成 Gateway apply 后，可从配置的 LAN/WAN 网卡访问该端口。首次登录必须修改密码；后续可在「账号与安全」页改用户名或密码。遗失密码时，在网关本机运行 `sudo gateway-kit auth-reset-password`。管理 UI 使用 HTTP；跨公网访问时应通过 HTTPS 反向代理或 VPN 保护连接，避免凭据和会话明文传输。若由 HTTPS 反向代理终止 TLS，可在 `gateway-kit` systemd drop-in 中设置 `GATEWAY_KIT_COOKIE_SECURE=1`，让会话 Cookie 仅通过 HTTPS 发送；不要在直接 HTTP 访问时设置此项。
-在向导里填写 WAN/LAN，以及 WireGuard 地址/Endpoint/密钥，或在「隧道」页粘贴服务端生成的 VLESS/Xray 链接文本；VLESS 方案要求系统预装 Xray-core，Gateway-Kit 会将其作为本机 SOCKS5 桥接，sing-box 继续处理 TProxy 与分流。敏感内容只写入 `/etc/gateway-kit/secrets.toml`（0600），API 不回显明文。两种境外出口二选一。
+在向导里填写 WAN/LAN，以及境外出口：WireGuard、VLESS 链接，或 SOCKS 中继（如经 EasyTier 到家中 Mixed 端口）。VLESS 方案要求系统预装 Xray-core，Gateway-Kit 会将其作为本机 SOCKS5 桥接；SOCKS 中继则由 sing-box 直连远端，不启 Xray。运行时三种出口择一，凭证可分槽保存以便切换回填。敏感内容只写入 `/etc/gateway-kit/secrets.toml`（0600），API 不回显明文。
 
-向导必须把运行模式改成「网关」，并配置 WireGuard 或 VLESS 链接，保存后再预览计划、确认应用。仍为观察模式时确认应用不会改网络。网关模式且检测到旧版 Router、PATH 中没有 `sing-box`（VLESS 出口还需要 Xray-core；启用 WG 却没有 `wg`、启用 DHCP 却没有 `dnsmasq`）时，计划为 blocked，不会改网络。确认后才会：
+向导必须把运行模式改成「网关」，并配置一种境外出口，保存后再预览计划、确认应用。仍为观察模式时确认应用不会改网络。网关模式且检测到旧版 Router、PATH 中没有 `sing-box`（VLESS 出口还需要 Xray-core；启用 WG 却没有 `wg`、启用 DHCP 却没有 `dnsmasq`）时，计划为 blocked，不会改网络。确认后才会：
 
 - `ip addr replace` 到你指定的网卡（仍不改主表 default）
 - 加载 nft 表 `gateway_kit` 与策略表 `51820`

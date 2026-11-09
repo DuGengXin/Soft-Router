@@ -20,6 +20,8 @@ export type Cfg = {
     peer_endpoint: string;
     peer_allowed_ips: string;
   };
+  /** Explicit overseas egress; omit/null means legacy inference. */
+  overseas_transport?: "none" | "wireguard" | "vless" | "socks" | null;
   routing: { china_direct: boolean; extra_direct_cidrs?: string[] };
   ui: { bind: string; port: number };
   port_forwards?: {

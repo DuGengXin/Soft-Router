@@ -11,7 +11,9 @@ mod proxy;
 mod uri_helpers;
 mod xray;
 pub(super) use proxy::render_xray_with_secrets;
-pub use proxy::{render_singbox, render_singbox_with_secrets, validate_proxy_uri};
+pub use proxy::{
+    render_singbox, render_singbox_with_secrets, validate_proxy_uri, validate_socks_proxy_uri,
+};
 
 fn lan_host_ip(config: &AppConfig) -> String {
     config

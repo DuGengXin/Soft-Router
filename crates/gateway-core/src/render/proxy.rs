@@ -1,8 +1,9 @@
-//! VLESS URI parsing and sing-box/Xray proxy configuration rendering.
+//! VLESS / SOCKS URI parsing and sing-box/Xray proxy configuration rendering.
 
 use crate::CoreError;
 use gateway_model::{
-    AppConfig, DNS_PROXY_PORT, Secrets, TPROXY_PORT, XRAY_SOCKS_PORT, wan_direct_cidr,
+    AppConfig, DNS_PROXY_PORT, Secrets, TPROXY_PORT, TunnelTransport, XRAY_SOCKS_PORT,
+    wan_direct_cidr,
 };
 use serde_json::json;
 
@@ -143,23 +144,142 @@ pub fn validate_proxy_uri(raw: &str) -> Result<(), CoreError> {
     parse_proxy_uri(raw).map(|_| ())
 }
 
+/// Validate a SOCKS relay URI (`socks5://` / `socks://`).
+pub fn validate_socks_proxy_uri(raw: &str) -> Result<(), CoreError> {
+    parse_socks_proxy_uri(raw).map(|_| ())
+}
+
+#[derive(Debug, Clone)]
+struct SocksOutbound {
+    server: String,
+    port: u16,
+    username: Option<String>,
+    password: Option<String>,
+}
+
+fn parse_socks_proxy_uri(raw: &str) -> Result<SocksOutbound, CoreError> {
+    let (scheme, remainder) = raw
+        .split_once("://")
+        .ok_or_else(|| CoreError::ConfigParse("socks_proxy_uri must use socks5://".into()))?;
+    if !matches!(
+        scheme.to_ascii_lowercase().as_str(),
+        "socks5" | "socks" | "socks5h"
+    ) {
+        return Err(CoreError::ConfigParse(
+            "socks_proxy_uri must use socks5:// or socks://".into(),
+        ));
+    }
+    let authority = remainder.split(['?', '#']).next().unwrap_or_default();
+    let (userinfo, host_port) = match authority.rsplit_once('@') {
+        Some((userinfo, host_port)) => (Some(userinfo), host_port),
+        None => (None, authority),
+    };
+    let (server, port) = parse_host_port_default(host_port, 1080)?;
+    let (username, password) = match userinfo {
+        Some(userinfo) => {
+            let (user, pass) = userinfo
+                .split_once(':')
+                .map(|(u, p)| (u, Some(p)))
+                .unwrap_or((userinfo, None));
+            (
+                Some(percent_decode(user)).filter(|value| !value.is_empty()),
+                pass.map(percent_decode).filter(|value| !value.is_empty()),
+            )
+        }
+        None => (None, None),
+    };
+    Ok(SocksOutbound {
+        server,
+        port,
+        username,
+        password,
+    })
+}
+
+fn parse_host_port_default(raw: &str, default_port: u16) -> Result<(String, u16), CoreError> {
+    if let Some(rest) = raw.strip_prefix('[') {
+        let (host, port) = rest
+            .split_once(']')
+            .ok_or_else(|| CoreError::ConfigParse("proxy URI has invalid IPv6 server".into()))?;
+        let port = port
+            .strip_prefix(':')
+            .filter(|value| !value.is_empty())
+            .map(|value| value.parse::<u16>())
+            .transpose()
+            .map_err(|_| CoreError::ConfigParse("proxy URI has invalid port".into()))?
+            .unwrap_or(default_port);
+        if host.is_empty() {
+            return Err(CoreError::ConfigParse("proxy URI has no server".into()));
+        }
+        return Ok((host.to_string(), port));
+    }
+    if let Some((server, port)) = raw.rsplit_once(':')
+        && !server.is_empty()
+        && port.parse::<u16>().is_ok()
+    {
+        let port = port
+            .parse::<u16>()
+            .map_err(|_| CoreError::ConfigParse("proxy URI has invalid port".into()))?;
+        return Ok((server.to_string(), port));
+    }
+    if raw.is_empty() {
+        return Err(CoreError::ConfigParse("proxy URI has no server".into()));
+    }
+    Ok((raw.to_string(), default_port))
+}
+
 pub fn render_singbox_with_secrets(
     config: &AppConfig,
     secrets: &Secrets,
 ) -> Result<String, CoreError> {
-    let proxy = secrets
-        .proxy_uri
-        .as_deref()
-        .filter(|uri| !uri.trim().is_empty())
-        .map(parse_proxy_uri)
-        .transpose()?;
-    Ok(render_singbox_transport(config, proxy.as_ref()))
+    let socks = match config.tunnel_transport(secrets) {
+        TunnelTransport::Vless => {
+            let raw = secrets
+                .proxy_uri
+                .as_deref()
+                .map(str::trim)
+                .filter(|uri| !uri.is_empty())
+                .ok_or_else(|| {
+                    CoreError::ConfigParse(
+                        "VLESS transport requires proxy_uri in secrets.toml".into(),
+                    )
+                })?;
+            // Validate the VLESS link even though sing-box only dials the local Xray SOCKS.
+            let _ = parse_proxy_uri(raw)?;
+            Some(SocksOutbound {
+                server: "127.0.0.1".into(),
+                port: XRAY_SOCKS_PORT,
+                username: None,
+                password: None,
+            })
+        }
+        TunnelTransport::Socks => {
+            let raw = secrets
+                .socks_proxy_uri
+                .as_deref()
+                .map(str::trim)
+                .filter(|uri| !uri.is_empty())
+                .ok_or_else(|| {
+                    CoreError::ConfigParse(
+                        "SOCKS transport requires socks_proxy_uri in secrets.toml".into(),
+                    )
+                })?;
+            Some(parse_socks_proxy_uri(raw)?)
+        }
+        TunnelTransport::Wireguard | TunnelTransport::None => None,
+    };
+    Ok(render_singbox_transport(config, socks.as_ref()))
 }
 
 pub(crate) fn render_xray_with_secrets(
     config: &AppConfig,
     secrets: &Secrets,
 ) -> Result<String, CoreError> {
+    if config.tunnel_transport(secrets) != TunnelTransport::Vless {
+        return Err(CoreError::ConfigParse(
+            "Xray VLESS bridge is only used when overseas_transport is vless".into(),
+        ));
+    }
     let proxy = secrets
         .proxy_uri
         .as_deref()
@@ -172,7 +292,7 @@ pub(crate) fn render_xray_with_secrets(
     Ok(super::xray::render(config, &proxy))
 }
 
-fn render_singbox_transport(config: &AppConfig, proxy: Option<&ProxyEndpoint>) -> String {
+fn render_singbox_transport(config: &AppConfig, socks: Option<&SocksOutbound>) -> String {
     let cidrs: Vec<String> = {
         let mut cidrs: Vec<String> = config
             .routing
@@ -243,14 +363,20 @@ fn render_singbox_transport(config: &AppConfig, proxy: Option<&ProxyEndpoint>) -
     } else {
         "[]"
     };
-    let (overseas_tag, overseas_outbound) = if proxy.is_some() {
-        let outbound = json!({
+    let (overseas_tag, overseas_outbound) = if let Some(socks) = socks {
+        let mut outbound = json!({
             "type": "socks",
             "tag": "proxy-out",
-            "server": "127.0.0.1",
-            "server_port": XRAY_SOCKS_PORT,
+            "server": socks.server,
+            "server_port": socks.port,
             "version": "5"
         });
+        if let Some(username) = &socks.username {
+            outbound["username"] = json!(username);
+        }
+        if let Some(password) = &socks.password {
+            outbound["password"] = json!(password);
+        }
         (
             "proxy-out",
             serde_json::to_string(&outbound).unwrap_or_else(|_| "{}".into()),

@@ -54,32 +54,48 @@ pub struct AppConfig {
     pub ui: UiConfig,
     #[serde(default)]
     pub port_forwards: Vec<PortForward>,
+    /// Explicit overseas egress. `None` means legacy inference from
+    /// `wireguard.enabled` / `proxy_uri` so older configs keep working.
+    #[serde(default)]
+    pub overseas_transport: Option<TunnelTransport>,
 }
 
-/// The single overseas transport in use. WireGuard and VLESS are mutually exclusive.
+/// The single overseas transport active at apply time.
+///
+/// Credentials for unused transports may remain stored; only this selection
+/// is rendered into the data plane.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TunnelTransport {
     None,
     Wireguard,
     Vless,
+    Socks,
 }
 
 impl AppConfig {
     /// Resolve the active overseas transport from config and stored secrets.
     pub fn tunnel_transport(&self, secrets: &Secrets) -> TunnelTransport {
+        if let Some(explicit) = self.overseas_transport {
+            return explicit;
+        }
         if self.wireguard.enabled {
             TunnelTransport::Wireguard
-        } else if secrets
-            .proxy_uri
-            .as_deref()
-            .is_some_and(|uri| !uri.trim().is_empty())
-        {
+        } else if secret_slot_present(&secrets.proxy_uri) {
             TunnelTransport::Vless
         } else {
             TunnelTransport::None
         }
     }
+
+    /// Keep `wireguard.enabled` aligned with the resolved overseas selection.
+    pub fn sync_wireguard_enabled_with_transport(&mut self, secrets: &Secrets) {
+        self.wireguard.enabled = self.tunnel_transport(secrets) == TunnelTransport::Wireguard;
+    }
+}
+
+fn secret_slot_present(value: &Option<String>) -> bool {
+    value.as_deref().is_some_and(|uri| !uri.trim().is_empty())
 }
 
 impl Default for AppConfig {
@@ -108,6 +124,7 @@ impl Default for AppConfig {
             dns: DnsConfig::default(),
             ui: UiConfig::default(),
             port_forwards: Vec::new(),
+            overseas_transport: None,
         }
     }
 }
@@ -222,42 +239,65 @@ impl AppConfig {
                     "WAN and LAN must be different NICs".into(),
                 ));
             }
-            let has_proxy_uri = secrets
-                .proxy_uri
-                .as_deref()
-                .is_some_and(|uri| !uri.trim().is_empty());
-            if !self.wireguard.enabled && !has_proxy_uri {
-                return Err(ValidateError::Message(
-                    "gateway mode requires WireGuard or a proxy_uri in secrets.toml".into(),
-                ));
+            match self.tunnel_transport(secrets) {
+                TunnelTransport::None => {
+                    return Err(ValidateError::Message(
+                        "gateway mode requires an overseas transport: WireGuard, VLESS, or SOCKS relay"
+                            .into(),
+                    ));
+                }
+                TunnelTransport::Wireguard | TunnelTransport::Vless | TunnelTransport::Socks => {}
             }
-            if self.wireguard.enabled && has_proxy_uri {
+            // Legacy configs without overseas_transport inferred WG from
+            // wireguard.enabled and VLESS from proxy_uri; both set was invalid.
+            if self.overseas_transport.is_none()
+                && self.wireguard.enabled
+                && secret_slot_present(&secrets.proxy_uri)
+            {
                 return Err(ValidateError::Message(
-                    "choose exactly one overseas transport: WireGuard or proxy_uri".into(),
+                    "choose exactly one overseas transport: set overseas_transport or keep only WireGuard or proxy_uri"
+                        .into(),
                 ));
             }
         }
-        if self.wireguard.enabled {
-            if self.wireguard.address.trim().is_empty()
-                || self.wireguard.peer_endpoint.trim().is_empty()
-            {
-                return Err(ValidateError::Message(
-                    "wireguard.enabled requires address and peer_endpoint".into(),
-                ));
-            }
-            if secrets
-                .wireguard_private_key
-                .as_ref()
-                .is_none_or(|k| k.is_empty())
-                || secrets
-                    .wireguard_peer_public_key
+        match self.tunnel_transport(secrets) {
+            TunnelTransport::Wireguard => {
+                if self.wireguard.address.trim().is_empty()
+                    || self.wireguard.peer_endpoint.trim().is_empty()
+                {
+                    return Err(ValidateError::Message(
+                        "WireGuard transport requires address and peer_endpoint".into(),
+                    ));
+                }
+                if secrets
+                    .wireguard_private_key
                     .as_ref()
                     .is_none_or(|k| k.is_empty())
-            {
-                return Err(ValidateError::Message(
-                    "wireguard.enabled requires keys in secrets.toml".into(),
-                ));
+                    || secrets
+                        .wireguard_peer_public_key
+                        .as_ref()
+                        .is_none_or(|k| k.is_empty())
+                {
+                    return Err(ValidateError::Message(
+                        "WireGuard transport requires keys in secrets.toml".into(),
+                    ));
+                }
             }
+            TunnelTransport::Vless => {
+                if !secret_slot_present(&secrets.proxy_uri) {
+                    return Err(ValidateError::Message(
+                        "VLESS transport requires proxy_uri in secrets.toml".into(),
+                    ));
+                }
+            }
+            TunnelTransport::Socks => {
+                if !secret_slot_present(&secrets.socks_proxy_uri) {
+                    return Err(ValidateError::Message(
+                        "SOCKS transport requires socks_proxy_uri in secrets.toml".into(),
+                    ));
+                }
+            }
+            TunnelTransport::None => {}
         }
         Ok(issues)
     }
