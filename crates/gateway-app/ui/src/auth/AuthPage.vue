@@ -37,7 +37,7 @@
             <el-form-item label="确认新密码">
               <el-input v-model="confirmPassword" type="password" show-password autocomplete="new-password" @keyup.enter="changePassword" />
             </el-form-item>
-            <p class="password-note">至少 12 个字符即可</p>
+            <p class="password-note">至少 6 个字符即可</p>
             <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
             <el-button class="submit" type="primary" :loading="busy" @click="changePassword">保存并进入控制台</el-button>
           </el-form>
@@ -99,7 +99,7 @@ async function login() {
 async function changePassword() {
   error.value = "";
   if (newPassword.value.length < 12) {
-    error.value = "新密码至少需要 12 个字符。";
+    error.value = "新密码至少需要 6 个字符。";
     return;
   }
   if (newPassword.value !== confirmPassword.value) {

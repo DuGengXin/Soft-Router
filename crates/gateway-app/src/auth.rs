@@ -218,8 +218,8 @@ pub(crate) async fn change_credentials(
             "用户名需为 3–32 位字母、数字、点、横线或下划线",
         );
     }
-    if !(12..=128).contains(&body.new_password.len()) {
-        return api_error(StatusCode::BAD_REQUEST, "新密码长度需为 12–128 个字节");
+    if !(6..=128).contains(&body.new_password.len()) {
+        return api_error(StatusCode::BAD_REQUEST, "新密码长度需为 6–128 个字节");
     }
     let mut secrets = match load_secrets(&state.secrets_path) {
         Ok(secrets) => secrets,

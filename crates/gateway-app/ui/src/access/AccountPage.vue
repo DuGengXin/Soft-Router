@@ -26,7 +26,7 @@
             </el-form-item>
             <el-form-item label="新密码">
               <el-input v-model="newPassword" type="password" show-password autocomplete="new-password" />
-              <div class="field-note">至少 12 个字符即可</div>
+              <div class="field-note">至少 6 个字符即可</div>
             </el-form-item>
             <el-form-item label="确认新密码">
               <el-input v-model="confirmPassword" type="password" show-password autocomplete="new-password" @keyup.enter="save" />
@@ -66,7 +66,7 @@ watch(() => props.username, (value) => { newUsername.value = value; });
 async function save() {
   error.value = "";
   if (newPassword.value.length < 12) {
-    error.value = "新密码至少需要 12 个字符。";
+    error.value = "新密码至少需要 6 个字符。";
     return;
   }
   if (newPassword.value !== confirmPassword.value) {
